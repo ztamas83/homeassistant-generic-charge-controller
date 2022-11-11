@@ -1,0 +1,242 @@
+"""Support for MQTT sensors."""
+from __future__ import annotations
+
+import collections
+from datetime import timedelta
+import logging
+
+import voluptuous as vol
+
+from homeassistant.components import sensor
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_NAME, CONF_UNIQUE_ID, STATE_ON, STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.exceptions import HomeAssistantError, PlatformNotReady
+import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+
+from .exceptions import NoSensorsError, SensorUnavailableError
+from .calculator import Calculator
+
+PHASE1 = "P1"
+PHASE2 = "P2"
+PHASE3 = "P3"
+
+CONF_ENTITYID_CURR_P1 = "current_sensor_phase1"
+CONF_ENTITYID_CURR_P2 = "current_sensor_phase2"
+CONF_ENTITYID_CURR_P3 = "current_sensor_phase3"
+CONF_ENTITYID_PRICE = "spot_price"
+CONF_ACCEPTED_MAX_PRICE = "accepted_max_price"
+
+CONF_RATED_CURRENT = "mains_fuse_current"
+# CONF_ENTITYID_CHARGER = "charger_entity"
+
+ATTR_LIMIT_Px = "Current limit %s"
+
+DEFAULT_SAMPLE_INTERVAL_SEC = 5
+
+PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
+    {
+        vol.Required(CONF_NAME): cv.string,
+        vol.Required(CONF_RATED_CURRENT): cv.positive_int,
+        vol.Required(CONF_ENTITYID_CURR_P1): cv.entity_id,
+        vol.Optional(CONF_ENTITYID_CURR_P2): cv.entity_id,
+        vol.Optional(CONF_ENTITYID_CURR_P3): cv.entity_id,
+        vol.Optional(CONF_UNIQUE_ID): cv.string,
+    }
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config: ConfigType,
+    add_entities: AddEntitiesCallback,
+    discovery_info: DiscoveryInfoType | None = None,
+) -> None:
+    """Set up the sensor platform."""
+
+    _LOGGER.warning("Setup request")
+    name = config.get(CONF_NAME)
+    phasecontrollers = {
+        PHASE1: PhaseController(PHASE1, config.get(CONF_ENTITYID_CURR_P1), None)
+    }
+
+    if p2_entity := config.get(CONF_ENTITYID_CURR_P2):
+        phasecontrollers[PHASE2] = PhaseController(PHASE2, p2_entity, None)
+
+    if p3_entity := config.get(CONF_ENTITYID_CURR_P3):
+        phasecontrollers[PHASE3] = PhaseController(PHASE3, p3_entity, None)
+
+    rated_current = config.get(CONF_RATED_CURRENT)
+    unique_id = config.get(CONF_UNIQUE_ID)
+
+    add_entities(
+        [ChargeControllerSensor(hass, name, phasecontrollers, rated_current, unique_id)]
+    )
+
+
+class PhaseController:
+    """Holds data for each phase"""
+
+    def __init__(self, phase: str, entity_id: str, target_current: float) -> None:
+        self._phase = phase
+        self._entity_id = entity_id
+        self._target_current = target_current
+        self._samples = collections.deque(
+            [], 60
+        )  # 60 x 5 seconds => 5 minutes of samples
+
+    @property
+    def entity_id(self):
+        """Entity ID"""
+        return self._entity_id
+
+    @property
+    def target_current(self):
+        """Target current on the phase"""
+        return self._target_current
+
+    @property
+    def samples(self) -> collections.deque:
+        """Samples"""
+        return self._samples
+
+    def add_sample(self, measurement: float) -> None:
+        self._samples.append(measurement)
+
+    def update_target(self, new_target_current: float) -> None:
+        """Sets the target current on the phase"""
+        _LOGGER.debug(
+            "Update target current on phase %s to %s", self._phase, new_target_current
+        )
+        self._target_current = new_target_current
+
+
+class ChargeControllerSensor(SensorEntity):
+    """Representation of a Sensor."""
+
+    def __init__(
+        self,
+        hass,
+        name,
+        phasecontrollers: dict[str, PhaseController],
+        rated_current=0,
+        unique_id="ChargeController",
+    ):
+        """Initialize the controller."""
+        self.hass = hass
+        self._name = name
+        self._phasecontrollers: dict[str, PhaseController] = phasecontrollers
+        self._rated_current = rated_current
+        self._calculator = Calculator(_LOGGER, rated_current)
+        self._unique_id = unique_id
+        self._state = STATE_UNAVAILABLE
+
+        # 6 samples, 5 seconds sampling -> 30 seconds mean calc
+
+        self._icon = "mdi:car-speed-limiter"
+
+        try:
+            self._update_phase_currents()
+        except SensorUnavailableError as err:
+            raise PlatformNotReady from err
+        except Exception as err:
+            raise HomeAssistantError from err
+
+        async_track_time_interval(
+            hass, self._async_update, timedelta(seconds=DEFAULT_SAMPLE_INTERVAL_SEC)
+        )
+
+        _LOGGER.info("Succesfully initialized sensor")
+
+    @callback
+    async def _async_update(self, now=None):
+        try:
+            self._update_phase_currents()
+        except NoSensorsError as err:
+            raise HomeAssistantError from err
+
+    def _update_phase_currents(self):
+        """Update local phase currents from source sensors."""
+
+        if not self._phasecontrollers:
+            raise NoSensorsError
+
+        for phase in self._phasecontrollers:
+            phase_controller = self._phasecontrollers[phase]
+            state = self.hass.states.get(phase_controller.entity_id)
+
+            _LOGGER.debug(state)
+            if not state or state.state == STATE_UNAVAILABLE:
+                self._set_state(STATE_UNAVAILABLE)
+                return
+
+            phase_controller.add_sample(float(state.state))
+
+            new_target = self._calculator.calculate_target_current(
+                phase_controller.samples[-1]
+            )
+
+            test_target = self._calculator.calculate_target_with_filter(
+                phase_controller
+            )
+            _LOGGER.debug("Simple: %s Running mean: %s", new_target, test_target)
+            if phase_controller.target_current != new_target:
+                _LOGGER.debug(
+                    "New target current on %s, %s -> %s",
+                    phase,
+                    phase_controller.target_current,
+                    new_target,
+                )
+                phase_controller.update_target(new_target)
+
+        self._set_state(STATE_ON)
+
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name
+
+    @property
+    def icon(self):
+        """Icon to use in the frontend, if any."""
+        return self._icon
+
+    @property
+    def state(self):
+        """Return the state of the device."""
+        return self._state
+
+    @property
+    def state_attributes(self):
+        """Return the attributes of the entity."""
+        phase_data = {}
+
+        for phase in (PHASE1, PHASE2, PHASE3):
+            if value := self._phasecontrollers.get(phase):
+                phase_data[ATTR_LIMIT_Px % phase] = value.target_current
+            else:
+                phase_data[ATTR_LIMIT_Px % phase] = None
+
+        return phase_data
+
+    @property
+    def unique_id(self):
+        """Return the unique id of this hygrostat."""
+        return self._unique_id
+
+    def _set_state(self, state):
+        """Setting sensor to given state."""
+        if self._state is not state:
+            self._state = state
+            self.schedule_update_ha_state()
+
+    @property
+    def rated_current(self):
+        """Rated current"""
+        return self._rated_current
