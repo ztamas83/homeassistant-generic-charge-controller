@@ -1,0 +1,6 @@
+{
+    "name": "Generic charge controller",
+    "hide_default_branch": true,
+    "zip_release": false,
+    "homeassistant": "0.1.0"
+}

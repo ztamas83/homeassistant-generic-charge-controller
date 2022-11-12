@@ -28,8 +28,9 @@ PHASE3 = "P3"
 CONF_ENTITYID_CURR_P1 = "current_sensor_phase1"
 CONF_ENTITYID_CURR_P2 = "current_sensor_phase2"
 CONF_ENTITYID_CURR_P3 = "current_sensor_phase3"
-CONF_ENTITYID_PRICE = "spot_price"
-CONF_ACCEPTED_MAX_PRICE = "accepted_max_price"
+CONF_ENTITYID_PRICE_CENTS = "spot_price_cents"
+CONF_ENTITYID_POWER_NOW = "charger_power_sensor"
+CONF_ACC_MAX_PRICE_CENTS = "accepted_max_price_cents"
 
 CONF_RATED_CURRENT = "mains_fuse_current"
 # CONF_ENTITYID_CHARGER = "charger_entity"
@@ -42,6 +43,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_NAME): cv.string,
         vol.Required(CONF_RATED_CURRENT): cv.positive_int,
+        vol.Optional(CONF_ACC_MAX_PRICE_CENTS): cv.int,
+        vol.Required(CONF_ENTITYID_POWER_NOW): cv.entity_id,
         vol.Required(CONF_ENTITYID_CURR_P1): cv.entity_id,
         vol.Optional(CONF_ENTITYID_CURR_P2): cv.entity_id,
         vol.Optional(CONF_ENTITYID_CURR_P3): cv.entity_id,
@@ -73,10 +76,20 @@ async def async_setup_platform(
         phasecontrollers[PHASE3] = PhaseController(PHASE3, p3_entity, None)
 
     rated_current = config.get(CONF_RATED_CURRENT)
-    unique_id = config.get(CONF_UNIQUE_ID)
+    charger_power = config.get(CONF_ENTITYID_POWER_NOW)
+    unique_id = config.get(CONF_UNIQUE_ID, None)
 
     add_entities(
-        [ChargeControllerSensor(hass, name, phasecontrollers, rated_current, unique_id)]
+        [
+            ChargeControllerSensor(
+                hass,
+                name,
+                phasecontrollers,
+                charger_power,
+                rated_current,
+                unique_id
+            )
+        ]
     )
 
 
@@ -125,6 +138,7 @@ class ChargeControllerSensor(SensorEntity):
         hass,
         name,
         phasecontrollers: dict[str, PhaseController],
+        charger_power_entity,
         rated_current=0,
         unique_id="ChargeController",
     ):
@@ -133,6 +147,8 @@ class ChargeControllerSensor(SensorEntity):
         self._name = name
         self._phasecontrollers: dict[str, PhaseController] = phasecontrollers
         self._rated_current = rated_current
+        self._charger_power_entity = charger_power_entity
+        self._charger_power = None
         self._calculator = Calculator(_LOGGER, rated_current)
         self._unique_id = unique_id
         self._state = STATE_UNAVAILABLE
@@ -141,31 +157,39 @@ class ChargeControllerSensor(SensorEntity):
 
         self._icon = "mdi:car-speed-limiter"
 
-        try:
-            self._update_phase_currents()
-        except SensorUnavailableError as err:
-            raise PlatformNotReady from err
-        except Exception as err:
-            raise HomeAssistantError from err
-
         async_track_time_interval(
             hass, self._async_update, timedelta(seconds=DEFAULT_SAMPLE_INTERVAL_SEC)
         )
 
-        _LOGGER.info("Succesfully initialized sensor")
+        _LOGGER.debug("Succesfully initialized sensor")
 
     @callback
     async def _async_update(self, now=None):
         try:
+            self._update_charger_power()
             self._update_phase_currents()
         except NoSensorsError as err:
             raise HomeAssistantError from err
 
+    def _update_charger_power(self):
+        """Updates the charger power value locally"""
+        charger_power_state = self.hass.states.get(self._charger_power_entity)
+        if not self._has_valid_value(charger_power_state):
+            raise HomeAssistantError
+        
+        self._charger_power = float(charger_power_state.state)
+
+    def _has_valid_value(entity_state) -> bool:
+        return entity_state and entity_state.state is not STATE_UNAVAILABLE
+
     def _update_phase_currents(self):
         """Update local phase currents from source sensors."""
+        
+        if not self._charger_power:
+            raise HomeAssistantError("Charger power not available")
 
         if not self._phasecontrollers:
-            raise NoSensorsError
+            raise NoSensorsError("Phase sensor(s) not available")
 
         for phase in self._phasecontrollers:
             phase_controller = self._phasecontrollers[phase]
@@ -179,7 +203,8 @@ class ChargeControllerSensor(SensorEntity):
             phase_controller.add_sample(float(state.state))
 
             new_target = self._calculator.calculate_target_current(
-                phase_controller.samples[-1]
+                phase_controller.samples[-1],
+
             )
 
             test_target = self._calculator.calculate_target_with_filter(
@@ -215,15 +240,16 @@ class ChargeControllerSensor(SensorEntity):
     @property
     def state_attributes(self):
         """Return the attributes of the entity."""
-        phase_data = {}
+        attributes = {}
 
         for phase in (PHASE1, PHASE2, PHASE3):
             if value := self._phasecontrollers.get(phase):
-                phase_data[ATTR_LIMIT_Px % phase] = value.target_current
+                attributes[ATTR_LIMIT_Px % phase] = value.target_current
             else:
-                phase_data[ATTR_LIMIT_Px % phase] = None
+                attributes[ATTR_LIMIT_Px % phase] = None
 
-        return phase_data
+        attributes["Current charger power (A)"] = self._charger_power
+        return attributes
 
     @property
     def unique_id(self):
