@@ -3,7 +3,8 @@
     "name": "generic_charge_controller",
     "documentation": "https://github.com/ztamas83/homeassistant-generic-charge-controller",
     "dependencies": [],
+    "after_dependencies": ["easee"],
     "codeowners": ["@ztamas83"],
-    "requirements": [],
+    "requirements": ["numpy"],
     "version": "0.1.0"
 }
