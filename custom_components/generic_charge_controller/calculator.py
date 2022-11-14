@@ -5,7 +5,6 @@ from math import trunc
 
 SAFETY_MARGIN = 1
 
-
 class Calculator:
     """Target current calculator"""
 

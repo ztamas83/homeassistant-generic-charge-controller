@@ -11,83 +11,82 @@ from homeassistant.components import sensor
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, CONF_UNIQUE_ID, STATE_ON, STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant, State, callback
-from homeassistant.exceptions import HomeAssistantError, PlatformNotReady
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.entity_registry import async_get as async_get_entity_reg
+from homeassistant.helpers.device_registry import async_get as async_get_dev_reg
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
-from .exceptions import NoSensorsError, SensorUnavailableError
+from .exceptions import NoSensorsError
 from .calculator import Calculator
+from .const import (
+    DATA_HASS_CONFIG,
+    CONF_RATED_CURRENT,
+    CONF_ACC_MAX_PRICE_CENTS,
+    CONF_ENTITYID_CURR_P1,
+    CONF_ENTITYID_CURR_P2,
+    CONF_ENTITYID_CURR_P3,
+    ATTR_LIMIT_Px,
+    PHASE1,
+    PHASE2,
+    PHASE3,
+)
+from uuid import uuid4
 
-PHASE1 = "P1"
-PHASE2 = "P2"
-PHASE3 = "P3"
-
-CONF_ENTITYID_CURR_P1 = "current_sensor_phase1"
-CONF_ENTITYID_CURR_P2 = "current_sensor_phase2"
-CONF_ENTITYID_CURR_P3 = "current_sensor_phase3"
-CONF_ENTITYID_PRICE_CENTS = "spot_price_cents"
-CONF_ENTITYID_POWER_NOW = "charger_power_sensor"
-CONF_ACC_MAX_PRICE_CENTS = "accepted_max_price_cents"
-
-CONF_RATED_CURRENT = "mains_fuse_current"
 # CONF_ENTITYID_CHARGER = "charger_entity"
-
-ATTR_LIMIT_Px = "Current limit %s"
 
 DEFAULT_SAMPLE_INTERVAL_SEC = 5
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_NAME): cv.string,
-        vol.Required(CONF_RATED_CURRENT): cv.positive_int,
-        vol.Optional(CONF_ACC_MAX_PRICE_CENTS): cv.int,
-        vol.Required(CONF_ENTITYID_POWER_NOW): cv.entity_id,
-        vol.Required(CONF_ENTITYID_CURR_P1): cv.entity_id,
-        vol.Optional(CONF_ENTITYID_CURR_P2): cv.entity_id,
-        vol.Optional(CONF_ENTITYID_CURR_P3): cv.entity_id,
-        vol.Optional(CONF_UNIQUE_ID): cv.string,
-    }
-)
+# PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
+#     {
+#         vol.Required(CONF_NAME): cv.string,
+#         vol.Required(CONF_RATED_CURRENT): cv.positive_int,
+#         vol.Optional(CONF_ACC_MAX_PRICE_CENTS): cv.positive_int,
+#         # vol.Required(CONF_ENTITYID_POWER_NOW): cv.entity_id,
+#         vol.Required(CONF_ENTITYID_CURR_P1): cv.entity_id,
+#         vol.Optional(CONF_ENTITYID_CURR_P2): cv.entity_id,
+#         vol.Optional(CONF_ENTITYID_CURR_P3): cv.entity_id,
+#         vol.Optional(CONF_UNIQUE_ID): cv.string,
+#     }
+# )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_platform(
-    hass: HomeAssistant,
-    config: ConfigType,
-    add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the sensor platform."""
+    """Set up the charger sensor(s)"""
+
+    entity_registry = async_get_entity_reg(hass)
+    device_registry = async_get_dev_reg(hass)
 
     _LOGGER.warning("Setup request")
-    name = config.get(CONF_NAME)
+    name = "ChargeController"
     phasecontrollers = {
-        PHASE1: PhaseController(PHASE1, config.get(CONF_ENTITYID_CURR_P1), None)
+        PHASE1: PhaseController(PHASE1, entry.data.get(CONF_ENTITYID_CURR_P1), None)
     }
 
-    if p2_entity := config.get(CONF_ENTITYID_CURR_P2):
+    if p2_entity := entry.data.get(CONF_ENTITYID_CURR_P2):
         phasecontrollers[PHASE2] = PhaseController(PHASE2, p2_entity, None)
 
-    if p3_entity := config.get(CONF_ENTITYID_CURR_P3):
+    if p3_entity := entry.data.get(CONF_ENTITYID_CURR_P3):
         phasecontrollers[PHASE3] = PhaseController(PHASE3, p3_entity, None)
 
-    rated_current = config.get(CONF_RATED_CURRENT)
-    charger_power = config.get(CONF_ENTITYID_POWER_NOW)
-    unique_id = config.get(CONF_UNIQUE_ID, None)
+    rated_current = entry.data.get(CONF_RATED_CURRENT)
+    # charger_power = config.get(CONF_ENTITYID_POWER_NOW)
 
-    add_entities(
+    async_add_entities(
         [
             ChargeControllerSensor(
-                hass,
-                name,
-                phasecontrollers,
-                charger_power,
-                rated_current,
-                unique_id
+                hass, name, phasecontrollers, None, rated_current, uuid4().hex
             )
         ]
     )
@@ -173,20 +172,20 @@ class ChargeControllerSensor(SensorEntity):
 
     def _update_charger_power(self):
         """Updates the charger power value locally"""
-        charger_power_state = self.hass.states.get(self._charger_power_entity)
-        if not self._has_valid_value(charger_power_state):
-            raise HomeAssistantError
-        
-        self._charger_power = float(charger_power_state.state)
+        # charger_power_state = self.hass.states.get(self._charger_power_entity)
+        # if not self._has_valid_value(charger_power_state):
+        #     raise HomeAssistantError
 
-    def _has_valid_value(entity_state) -> bool:
+        # self._charger_power = float(charger_power_state.state)
+
+    def _has_valid_value(self, entity_state) -> bool:
         return entity_state and entity_state.state is not STATE_UNAVAILABLE
 
     def _update_phase_currents(self):
         """Update local phase currents from source sensors."""
-        
-        if not self._charger_power:
-            raise HomeAssistantError("Charger power not available")
+
+        # if not self._charger_power:
+        #     raise HomeAssistantError("Charger power not available")
 
         if not self._phasecontrollers:
             raise NoSensorsError("Phase sensor(s) not available")
@@ -204,7 +203,6 @@ class ChargeControllerSensor(SensorEntity):
 
             new_target = self._calculator.calculate_target_current(
                 phase_controller.samples[-1],
-
             )
 
             test_target = self._calculator.calculate_target_with_filter(
