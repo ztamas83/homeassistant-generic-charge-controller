@@ -21,11 +21,14 @@ from .const import (
     # CONF_ENTITYID_CURR_P3,
     CONF_RATED_CURRENT,
     CONF_CHRG_ID,
+    CONF_CHRG_DOMAIN,
 )
 
 DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_ENTITYID_CURR_P1): cv.string,
+        vol.Required(
+            CONF_ENTITYID_CURR_P1, description="Sensor ID for current P1"
+        ): cv.string,
         vol.Required(CONF_RATED_CURRENT): cv.positive_int,
         vol.Required(CONF_CHRG_ID): cv.string,
         vol.Optional(CONF_ACC_MAX_PRICE_CENTS): cv.positive_int,
@@ -51,10 +54,10 @@ class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
             charger_device_id = user_input[CONF_CHRG_ID]
 
             dev_reg = device_registry.async_get(self.hass)
-            charger_device_id = dev_reg.async_get(charger_device_id)
+            charger_device = dev_reg.async_get(charger_device_id)
 
             errors = {}
-            if not charger_device_id:
+            if not charger_device:
                 errors[CONF_CHRG_ID] = "Device not found"
 
             if errors:
@@ -64,7 +67,10 @@ class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
                     errors=errors,
                 )
 
-            unique_id = uuid.uuid4().hex
+            idset = charger_device.identifiers.pop()
+            unique_id = idset[1]
+
+            user_input[CONF_CHRG_DOMAIN] = idset[0]
 
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()

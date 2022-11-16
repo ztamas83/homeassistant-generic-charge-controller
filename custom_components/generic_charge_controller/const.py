@@ -4,7 +4,7 @@
 DATA_HASS_CONFIG = "generic_charger_hass_config"
 DOMAIN = "generic_charge_controller"
 
-
+PHASE_TMP = "P%s"
 PHASE1 = "P1"
 PHASE2 = "P2"
 PHASE3 = "P3"
