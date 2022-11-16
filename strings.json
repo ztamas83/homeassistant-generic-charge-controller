@@ -1,0 +1,17 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "data": {
+            "current_sensor_phase1": "Current sensor for phase1",
+            "current_sensor_phase2": "Current sensor for phase2",
+            "current_sensor_phase3": "Current sensor for phase3",
+            "mains_fuse_current": "Mains fuse size (A)",
+            "charger_device_id": "EV charger device ID"
+          },
+          "title": "Charge controller configuration",
+          "description": "Enter data"
+        }
+      }
+    }
+  }

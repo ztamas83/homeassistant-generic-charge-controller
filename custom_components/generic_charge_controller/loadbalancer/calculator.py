@@ -5,6 +5,7 @@ from math import trunc
 
 SAFETY_MARGIN = 1
 
+
 class Calculator:
     """Target current calculator"""
 
@@ -31,11 +32,11 @@ class Calculator:
 
         return self._get_new_current(current_load)
 
-    def calculate_target_with_filter(self, phase_controller) -> int:
+    def calculate_target_with_filter(self, phase_data) -> int:
         """Provides the target current run through a mean filter"""
 
         running_mean = self._running_mean(
-            phase_controller.samples,
+            phase_data.samples,
             6,  # windows size 6 => 5x6 seconds, 30 sec
         )
 

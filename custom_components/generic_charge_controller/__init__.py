@@ -57,7 +57,5 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )
-    if unload_ok:
-        tibber_connection = hass.data[DOMAIN]
-        await tibber_connection.rt_disconnect()
+
     return unload_ok
