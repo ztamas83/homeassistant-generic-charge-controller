@@ -1,33 +1,43 @@
 """Adds config flow for generic_charge_controller integration."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-import logging
 import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers import device_registry
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
-
-import uuid
+import homeassistant.helpers.config_validation as cv
+import homeassistant.helpers.device_registry as dr
 
 from .const import (
-    DOMAIN,
     CONF_ACC_MAX_PRICE_CENTS,
-    CONF_ENTITYID_CURR_P1,
-    # CONF_ENTITYID_CURR_P2,
-    # CONF_ENTITYID_CURR_P3,
-    CONF_RATED_CURRENT,
-    CONF_CHRG_ID,
     CONF_CHRG_DOMAIN,
+    CONF_CHRG_ID,
+    CONF_ENTITYID_CURR_P1,
+    CONF_ENTITYID_CURR_P2,
+    CONF_ENTITYID_CURR_P3,
+    CONF_RATED_CURRENT,
+    DOMAIN,
 )
 
 DATA_SCHEMA = vol.Schema(
     {
         vol.Required(
-            CONF_ENTITYID_CURR_P1, description="Sensor ID for current P1"
+            CONF_ENTITYID_CURR_P1,
+            msg="Sensor ID for current P1",
+            description="Sensor ID for current P1",
+        ): cv.string,
+        vol.Optional(
+            CONF_ENTITYID_CURR_P2,
+            msg="Sensor ID for current P2",
+            description="Sensor ID for current P2",
+        ): cv.string,
+        vol.Optional(
+            CONF_ENTITYID_CURR_P3,
+            msg="Sensor ID for current P3",
+            description="Sensor ID for current P3",
         ): cv.string,
         vol.Required(CONF_RATED_CURRENT): cv.positive_int,
         vol.Required(CONF_CHRG_ID): cv.string,
@@ -53,7 +63,7 @@ class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             charger_device_id = user_input[CONF_CHRG_ID]
 
-            dev_reg = device_registry.async_get(self.hass)
+            dev_reg = dr.async_get(self.hass)
             charger_device = dev_reg.async_get(charger_device_id)
 
             errors = {}
