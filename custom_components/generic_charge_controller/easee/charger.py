@@ -1,13 +1,13 @@
 """Control for Easee EV chargers"""
 
-from logging import Logger
+from datetime import datetime
+import logging
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_reg
 from homeassistant.helpers.state import State
-from datetime import datetime, timedelta
 
 from ..abstract_charger import AbstractCharger
 from ..const import PHASE_TMP
@@ -29,14 +29,11 @@ from .const import (
 
 
 class EaseeCharger(AbstractCharger):
-    """Charger implementation for Easee"""
+    """Charger implementation for Easee chargers."""
 
-    def __init__(
-        self, hass: HomeAssistant, logger: Logger, device_id: str, unique_id: str
-    ) -> None:
-        """Init"""
+    def __init__(self, hass: HomeAssistant, device_id: str, unique_id: str) -> None:
         self.hass = hass
-        self._logger = logger
+        self._logger = logging.getLogger(__name__)
         self._device_id = device_id
         self._unique_id = unique_id
         self._rated_current: float = 0.0
@@ -80,7 +77,8 @@ class EaseeCharger(AbstractCharger):
 
         balance_needed = (datetime.now() - self._last_balanced[0]).total_seconds() > 180
         for i in range(1, 4):
-            if p_curr := phases.get(PHASE_TMP % i, None):
+            p_curr = phases.get(PHASE_TMP % i, None)
+            if p_curr is not None:
                 svc_data[f"currentP{i}"] = p_curr
                 if p_curr != self._last_balanced[1].get(f"currentP{i}", 0.0):
                     balance_needed = True
@@ -89,17 +87,19 @@ class EaseeCharger(AbstractCharger):
             self._logger.info("No load balancing update needed")
             return
 
-        self._logger.debug("Load balancing with data: %s", svc_data)
+        self._logger.info("Load balancing with data: %s", svc_data)
 
-        if not await self.hass.services.async_call(
+        await self.hass.services.async_call(
             "easee", SVC_SET_LIMIT, svc_data, blocking=True
-        ):
-            raise HomeAssistantError("Cannot send load balancing command")
+        )
+
+        # if not balancing_ok:
+        #     raise HomeAssistantError("Cannot send load balancing command")
 
         self._last_balanced = (datetime.now(), svc_data)
 
     def _get_state(self, req_state: str) -> State:
-        """Get specific state"""
+        """Get specific state."""
         state_uid = f"{self._unique_id}_{req_state}"
         entity_reg = async_get_entity_reg(self.hass)
         entity = entity_reg.async_get_entity_id(
@@ -112,7 +112,7 @@ class EaseeCharger(AbstractCharger):
 
         state = self.hass.states.get(entity)
         if not state:
-            self._logger.debug("Entity %s state cannot be fetched")
+            self._logger.debug("Entity %s state cannot be fetched", entity)
             return None
 
         self._logger.debug("Entity %s state: %s", state_uid, state.as_dict())
@@ -121,6 +121,9 @@ class EaseeCharger(AbstractCharger):
     @property
     def phase_currents(self) -> dict[str, float]:
         circuit_current = self._get_state(S_NAME_CIRCUITCURRENT)
+
+        if not circuit_current:
+            return {PHASE_TMP % p: 0.0 for p in range(1, 4)}
 
         ret_currents = {}
 

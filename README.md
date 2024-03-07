@@ -5,24 +5,7 @@ Due to the fact that humidity levels are different during the summer and winter,
 
 
 ## Setup
-In your `configuration.yaml` you'll need:
-
-
-```
-Next, add some automations to control the charge levels:
-
-```yaml
-automation:
-- alias: some alias
-  trigger:
-    platform: state
-    entity_id: 
-  action:
-    - service: 
-      entity_id: 
-
-```
-
+Follow the config flow
 
 ## Installation
 ### HACS [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)

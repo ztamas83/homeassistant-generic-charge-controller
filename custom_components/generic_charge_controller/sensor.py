@@ -57,27 +57,27 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the charger sensor(s)"""
+    """Set up the charger sensor(s)."""
 
     entity_registry = async_get_entity_reg(hass)
     device_registry = async_get_dev_reg(hass)
 
-    _LOGGER.warning("Setup request")
+    _LOGGER.debug("Setup request")
     phases = {
-        PHASE1: ElectricalPhase(PHASE1, entry.data.get(CONF_ENTITYID_CURR_P1), None)
+        PHASE1: ElectricalPhase(PHASE1, entry.data.get(CONF_ENTITYID_CURR_P1), None),
     }
 
     charger_dev = device_registry.async_get(entry.data.get(CONF_CHRG_ID))
 
     if not charger_dev:
         raise HomeAssistantError(
-            "Device ID %s is not found in registry", entry.data.get(CONF_CHRG_ID)
+            f"Device ID {entry.data.get(CONF_CHRG_ID)} is not found in registry"
         )
 
     if entry.data.get(CONF_CHRG_DOMAIN) != "easee":
         raise HomeAssistantError("Currently only EASEE chargers are supported")
 
-    charger = EaseeCharger(hass, _LOGGER, entry.data.get(CONF_CHRG_ID), entry.unique_id)
+    charger = EaseeCharger(hass, entry.data.get(CONF_CHRG_ID), entry.unique_id)
 
     if p2_entity := entry.data.get(CONF_ENTITYID_CURR_P2):
         phases[PHASE2] = ElectricalPhase(PHASE2, p2_entity, None)
@@ -99,7 +99,7 @@ async def async_setup_entry(
 
 
 class ElectricalPhase:
-    """Holds data for each phase"""
+    """Holds data for each phase."""
 
     def __init__(self, phase: str, entity_id: str, target_current: float) -> None:
         self._phase = phase
@@ -111,29 +111,31 @@ class ElectricalPhase:
 
     @property
     def phase_id(self):
-        """Phase ID"""
+        """Phase ID."""
         return self._phase
 
     @property
     def entity_id(self):
-        """Entity ID"""
+        """Entity ID."""
         return self._entity_id
 
     @property
     def target_current(self):
-        """Target current on the phase"""
+        """Target current on the phase."""
         return self._target_current
 
     @property
     def samples(self) -> collections.deque:
-        """Samples"""
+        """Samples."""
         return self._samples
 
     def add_sample(self, measurement: float) -> None:
+        """Add a measurement sample."""
         self._samples.append(measurement)
 
     def update_target(self, new_target_current: float) -> None:
-        """Sets the target current on the phase"""
+        """Set the target current on the phase."""
+
         _LOGGER.debug(
             "Update target current on phase %s to %s", self._phase, new_target_current
         )
@@ -145,7 +147,7 @@ class ChargeControllerSensor(SensorEntity):
 
     def __init__(
         self,
-        hass,
+        hass: HomeAssistant,
         name,
         unique_id,
         phases: dict[str, ElectricalPhase],
@@ -182,7 +184,7 @@ class ChargeControllerSensor(SensorEntity):
     @callback
     async def _do_balancing(self, now=None):
         await self._charger.update_limits(
-            dict(map(lambda kv: (kv[0], kv[1].target_current), self._phases.items()))
+            {kv[0]: kv[1].target_current for kv in self._phases.items()}
         )
 
     @callback
@@ -253,11 +255,11 @@ class ChargeControllerSensor(SensorEntity):
         return attributes
 
     def _set_state(self, state):
-        """Setting sensor to given state."""
+        """Set sensor to given state."""
         self._state = state
         self.schedule_update_ha_state()
 
     @property
     def rated_current(self):
-        """Rated current"""
+        """Get rated current."""
         return self._rated_current
