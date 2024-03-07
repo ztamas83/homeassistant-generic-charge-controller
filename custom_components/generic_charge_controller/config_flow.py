@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
@@ -39,8 +38,8 @@ DATA_SCHEMA = vol.Schema(
             msg="Sensor ID for current P3",
             description="Sensor ID for current P3",
         ): cv.string,
-        vol.Required(CONF_RATED_CURRENT): cv.positive_int,
-        vol.Required(CONF_CHRG_ID): cv.string,
+        vol.Required(CONF_RATED_CURRENT, msg="Rated current"): cv.positive_int,
+        vol.Required(CONF_CHRG_ID, msg="Charger ID"): cv.string,
         vol.Optional(CONF_ACC_MAX_PRICE_CENTS): cv.positive_int,
     }
 )
@@ -51,7 +50,7 @@ _LOGGER = logging.getLogger(__name__)
 class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for the charge controller integration."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -90,8 +89,25 @@ class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
                 data=user_input,
             )
 
+        entities_with_ampere = []
+
+        all_states = await self.hass.async_add_job(self.hass.states.async_all)
+
+        # Iterate through all entities in the Entity Registry
+        for entity_id, entity in all_states.items():
+            # Check if the entity has a unit of measurement attribute
+            if "unit_of_measurement" in entity.attributes:
+                # Check if the unit of measurement is "A" (replace "A" with your desired unit)
+                if entity.attributes["unit_of_measurement"] == "A":
+                    entities_with_ampere.append(entity_id)
+
         return self.async_show_form(
             step_id="user",
-            data_schema=DATA_SCHEMA,
+            data_schema={
+                vol.Required(
+                    "entity_id",
+                    description="Select an entity",
+                ): vol.In(entities_with_ampere)
+            },
             errors={},
         )

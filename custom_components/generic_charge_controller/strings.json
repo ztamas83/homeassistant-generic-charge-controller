@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "current_sensor_phase1": "Current sensor for phase 1",
+          "current_sensor_phase2": "Current sensor for phase 2",
+          "current_sensor_phase3": "Current sensor for phase 3",
+          "charger_device_id": "Charger ID"
+        },
+        "description": "Set load balancer options",
+        "title": "Load balancer configuration"
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "invalid_path": "The path provided is not valid. Should be in the format `user/repo-name` and should be a valid github repository."
+    },
+    "step": {
+      "init": {
+        "title": "Manage Repos",
+        "data": {
+          "repos": "Existing Repos: Uncheck any repos you want to remove.",
+          "path": "New Repo: Path to the repository e.g. home-assistant-core",
+          "name": "New Repo: Name of the sensor."
+        },
+        "description": "Remove existing repos or add a new repo."
+      }
+    }
+  }
+}
