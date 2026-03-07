@@ -17,16 +17,16 @@ class AbstractCharger:
         pass
 
     @property
-    @abc.abstractclassmethod
+    @abc.abstractmethod
     def phase_currents(self) -> dict[str, float]:
         pass
 
     @property
-    @abc.abstractclassmethod
+    @abc.abstractmethod
     def rated_current(self) -> float:
         pass
 
     @property
-    @abc.abstractclassmethod
+    @abc.abstractmethod
     def charging(self) -> bool:
         pass
