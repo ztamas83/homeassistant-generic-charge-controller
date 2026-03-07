@@ -3,6 +3,12 @@
 import abc
 
 
+class ChargerConfiguration:
+    @property
+    def charger_id(self) -> str:
+        """Unique ID for the charger, e.g. "easee_living_room" or "detected_charger_1"."""
+        pass
+
 class AbstractCharger:
     @abc.abstractmethod
     def start(self) -> None:

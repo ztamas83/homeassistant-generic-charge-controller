@@ -15,19 +15,21 @@ import uuid
 
 from .const import (
     DOMAIN,
+    VERSION,
     CONF_ACC_MAX_PRICE_CENTS,
-    CONF_ENTITYID_CURR_P1,
-    # CONF_ENTITYID_CURR_P2,
-    # CONF_ENTITYID_CURR_P3,
+    CONF_ENTITYID_CURR_L1,
+    # CONF_ENTITYID_CURR_L2,
+    # CONF_ENTITYID_CURR_L3,
     CONF_RATED_CURRENT,
     CONF_CHRG_ID,
     CONF_CHRG_DOMAIN,
+
 )
 
 DATA_SCHEMA = vol.Schema(
     {
         vol.Required(
-            CONF_ENTITYID_CURR_P1, description="Sensor ID for current P1"
+            CONF_ENTITYID_CURR_L1, description="Sensor ID for current P1"
         ): cv.string,
         vol.Required(CONF_RATED_CURRENT): cv.positive_int,
         vol.Required(CONF_CHRG_ID): cv.string,

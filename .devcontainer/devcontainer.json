@@ -6,6 +6,9 @@
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-trixie",
 	"features": {
 		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/node:1": {},
+		"ghcr.io/stu-bell/devcontainer-features/gemini-cli:0": {}
+
 		// "ghcr.io/devcontainer-config/features/dot-config:4": {}
 	},
 
@@ -14,9 +17,12 @@
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
+	"forwardPorts": [
+		5173
+	],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "pip3 install --user -r requirements.txt"
+	"postCreateCommand": "pip3 install --user -r requirements.txt && . ${NVM_DIR}/nvm.sh && nvm install --lts",
 
 	// Configure tool-specific properties.
 	// "customizations": {},

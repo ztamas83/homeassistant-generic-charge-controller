@@ -37,9 +37,9 @@ from .loadbalancer.calculator import Calculator
 from .const import (
     CONF_CHRG_DOMAIN,
     CONF_CHRG_ID,
-    CONF_ENTITYID_CURR_P1,
-    CONF_ENTITYID_CURR_P2,
-    CONF_ENTITYID_CURR_P3,
+    CONF_ENTITYID_CURR_L1,
+    CONF_ENTITYID_CURR_L2,
+    CONF_ENTITYID_CURR_L3,
     CONF_RATED_CURRENT,
     DOMAIN,
     PHASE1,
@@ -64,7 +64,8 @@ async def async_setup_entry(
 
     _LOGGER.warning("Setup request")
     phases = {
-        PHASE1: ElectricalPhase(PHASE1, entry.data.get(CONF_ENTITYID_CURR_P1), None)
+        PHASE1: ElectricalPhase(
+            PHASE1, entry.data.get(CONF_ENTITYID_CURR_L1), None)
     }
 
     charger_dev = device_registry.async_get(entry.data.get(CONF_CHRG_ID))
@@ -79,10 +80,10 @@ async def async_setup_entry(
 
     charger = EaseeCharger(hass, _LOGGER, entry.data.get(CONF_CHRG_ID), entry.unique_id)
 
-    if p2_entity := entry.data.get(CONF_ENTITYID_CURR_P2):
+    if p2_entity := entry.data.get(CONF_ENTITYID_CURR_L2):
         phases[PHASE2] = ElectricalPhase(PHASE2, p2_entity, None)
 
-    if p3_entity := entry.data.get(CONF_ENTITYID_CURR_P3):
+    if p3_entity := entry.data.get(CONF_ENTITYID_CURR_L3):
         phases[PHASE3] = ElectricalPhase(PHASE3, p3_entity, None)
 
     async_add_entities(
