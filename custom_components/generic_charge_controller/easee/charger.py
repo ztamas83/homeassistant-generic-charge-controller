@@ -103,7 +103,7 @@ class EaseeCharger(AbstractCharger):
         state_uid = f"{self._unique_id}_{req_state}"
         entity_reg = async_get_entity_reg(self.hass)
         entity = entity_reg.async_get_entity_id(
-            Platform.SENSOR.SENSOR, CHRG_DOMAIN, state_uid
+            Platform.SENSOR, CHRG_DOMAIN, state_uid
         )
 
         if not entity:

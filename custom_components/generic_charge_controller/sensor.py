@@ -159,13 +159,13 @@ class ChargeControllerSensor(SensorEntity):
             self._phases: dict[str, ElectricalPhase] = phases
 
             # self.state_class = SensorStateClass.MEASUREMENT
-            self._state = STATE_OFF
+            self._attr_native_value = STATE_OFF
 
             self._charger = charger
 
             # 6 samples, 5 seconds sampling -> 30 seconds mean calc
 
-            self._icon = "mdi:car-speed-limiter"
+            self._attr_icon = "mdi:car-speed-limiter"
 
             async_track_time_interval(
                 self.hass,
@@ -174,8 +174,6 @@ class ChargeControllerSensor(SensorEntity):
             )
 
             _LOGGER.debug("Succesfully initialized sensor")
-
-            self.schedule_update_ha_state()
         except Exception as err:
             raise PlatformNotReady from err
 
@@ -188,7 +186,7 @@ class ChargeControllerSensor(SensorEntity):
     @callback
     async def _async_update(self, now=None):
         self._update_phase_currents()
-        if self._state == STATE_UNAVAILABLE:
+        if self._attr_native_value == STATE_UNAVAILABLE:
             raise PlatformNotReady("Sensors unavailable, cannot do load balancing")
 
         if self._charger.charging:
@@ -239,7 +237,7 @@ class ChargeControllerSensor(SensorEntity):
         self._set_state(STATE_OFF)
 
     @property
-    def state_attributes(self):
+    def extra_state_attributes(self):
         """Return the attributes of the entity."""
         attributes = {}
 
@@ -254,8 +252,8 @@ class ChargeControllerSensor(SensorEntity):
 
     def _set_state(self, state):
         """Setting sensor to given state."""
-        self._state = state
-        self.schedule_update_ha_state()
+        self._attr_native_value = state
+        self.async_write_ha_state()
 
     @property
     def rated_current(self):

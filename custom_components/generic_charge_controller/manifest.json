@@ -7,5 +7,6 @@
     "codeowners": ["@ztamas83"],
     "requirements": ["numpy"],
     "version": "0.1.0",
+    "iot_class": "calculated",
     "config_flow": true
 }
