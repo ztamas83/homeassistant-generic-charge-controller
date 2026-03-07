@@ -1,9 +1,11 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { mdiScaleBalance, mdiScaleBalanceOff } from "../utils/icons";
+import { modeStyles } from "../styles/shared-mode-styles";
 
 @customElement("cc-charger-card")
 export class CcChargerCard extends LitElement {
+  @property() public chargerId = "";
   @property() public name = "";
   @property() public serialNumber = "";
   @property() public status = "";
@@ -13,8 +15,14 @@ export class CcChargerCard extends LitElement {
   @property({ type: Boolean }) public configured = false;
 
   protected render() {
+    const accentClass = this.configured
+      ? this.status === "charging"
+        ? "accent-charging"
+        : "accent-idle"
+      : "accent-unconfigured";
     return html`
-      <ha-card .header=${this.name}>
+      <ha-card .header=${this.name} @click=${this._handleClick}>
+        <div class="accent ${accentClass}"></div>
         <ha-svg-icon
           class="configured-icon ${this.configured ? "is-configured" : ""}"
           .path=${this.configured ? mdiScaleBalance : mdiScaleBalanceOff}
@@ -46,22 +54,32 @@ export class CcChargerCard extends LitElement {
              <div class="progress" style="width: ${Math.min(100, (this.currentUsage / this.currentLimit) * 100)}%"></div>
           </div>
         </div>
-        <div class="card-actions">
-          ${this.configured
-            ? html`<ha-button>Details</ha-button>`
-            : html`<ha-button>Configure</ha-button>`
-          }
-        </div>
+        <!-- Future action buttons can be added here -->
       </ha-card>
     `;
   }
 
+  private _handleClick() {
+    this.dispatchEvent(new CustomEvent("charger-selected", {
+      detail: { chargerId: this.chargerId },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
   static styles = css`
     ha-card {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
+      cursor: pointer;
+      transition: box-shadow 0.2s ease, transform 0.15s ease;
+      overflow: hidden;
       position: relative;
+      height: 100%;
+      box-sizing: border-box;
+    }
+
+    ha-card:hover {
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+      transform: translateY(-1px);
     }
 
     .configured-icon {
@@ -123,6 +141,37 @@ export class CcChargerCard extends LitElement {
       gap: 8px;
       border-top: 1px solid var(--divider-color);
       padding: 4px 8px;
+    }
+
+    /* Colored left accent based on mode */
+    .accent {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+    }
+
+    .accent-charging {
+      background: var(--warning-color, #00ff88);
+    }
+
+    .accent-idle {
+      background: var(--disabled-text-color, #bdbdbd);
+    }
+
+    .accent-unconfigured {
+      background: transparent;
+    }
+    
+    /* Configure prompt for unconfigured areas */
+    .configure-prompt {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--divider-color, #eee);
     }
   `;
 }
