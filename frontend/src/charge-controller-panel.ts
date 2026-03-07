@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { loadHaElements } from "./load-ha-elements";
+import { getEaseeChargers } from "./utils/charger/easee";
 import "./components/cc-charger-card";
 
 @customElement("charge-controller-panel")
@@ -26,26 +27,32 @@ export class ChargeControllerPanel extends LitElement {
       return html`<div class="loading">Loading...</div>`;
     }
 
+    // collect chargers data from Home Assistant, here it will be possible to collect data from multiple platforms in the future,
+    //  for now we will only collect data from easee chargers
+    const chargers = getEaseeChargers(this.hass);
+
     return html`
       <div class="toolbar">
         <div class="title">Charge Controller</div>
       </div>
       <div class="content">
-        <div class="grid">
-          <cc-charger-card
-            .name=${"Main Garage Charger"}
-            .status=${"Charging"}
-            .currentLimit=${16}
-            .currentUsage=${12.5}
-          ></cc-charger-card>
-          
-          <cc-charger-card
-            .name=${"Guest Parking"}
-            .status=${"Idle"}
-            .currentLimit=${32}
-            .currentUsage=${0}
-          ></cc-charger-card>
-        </div>
+        ${chargers.length === 0
+        ? html`<p>No Easee chargers detected in your system.</p>`
+        : html`
+            <div class="grid">
+              ${chargers.map(charger => html`
+                <cc-charger-card
+                  .name=${charger.name}
+                  .serialNumber=${charger.serialNumber}
+                  .status=${charger.status}
+                  .power=${charger.power}
+                  .currentLimit=${charger.currentLimit}
+                  .currentUsage=${charger.currentUsage}
+                  .configured=${charger.configured}
+                ></cc-charger-card>
+              `)}
+            </div>
+          `}
       </div>
     `;
   }

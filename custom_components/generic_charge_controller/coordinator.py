@@ -57,33 +57,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self.chargers: dict = {}
         self._loadbalancer: DynamicLoadBalancer | None = None
         self._last_measurements: dict = {}
-        self._history_store: HistoryStore | None = None
-        # self.outdoor_temp: float | None = None
-        # self.outdoor_humidity: float | None = None
-        # self._window_manager = WindowManager()
-        # self._previous_modes: dict[str, str] = {}
-        # self._model_manager: RoomModelManager = RoomModelManager()
-        # self._model_loaded = False
-        # self._thermal_save_count: int = 0
-        # self._last_temps: dict[str, float] = {}
-        # self._history_write_count: int = 0
-        # self._history_rotate_count: int = 0
-        # self._pending_predictions: dict[str, float] = {}
-        # self._prediction_forecasts: dict[str, list[dict]] = {}
-        # self._weather_manager = WeatherManager(hass)
-        # # EKF accumulator: batch updates for better signal-to-noise ratio
-        # self._ekf_accumulated_dt: dict[str, float] = {}
-        # self._ekf_accumulated_mode: dict[str, str] = {}
-        # self._ekf_accumulated_pf: dict[str, float] = {}
-        # self._current_q_solar: float = 0.0
-        # # Valve protection (anti-seize)
-        # self._valve_manager = ValveManager(hass)
-        # # Mold risk tracking
-        # self._mold_manager = MoldManager(hass)
-        # # Residual heat tracking (heating → idle transition)
-        # self._residual_tracker = ResidualHeatTracker()
-        # # Track which rooms already have sensor entities registered
-        # self._entity_areas: set[str] = set()
+        self._history_store = None
 
     async def _async_update_data(self) -> dict:
         """Fetch and compute state for all chargers.
@@ -100,14 +74,16 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
 
         # Read outdoor sensors from global settings
         settings = store.get_settings()
-        
+
         return {"chargers": chargers }
 
-    async def _async_process_room(self, room: dict, settings: dict, outdoor_forecast: list[dict]) -> dict:
-        """Process a single room: read sensor, evaluate schedule, apply control."""
-        area_id = room.get("area_id", "unknown")
+    async def _async_process_charger(
+        self, charger: dict, settings: dict, outdoor_forecast: list[dict]
+    ) -> dict:
+        """Process a single charger: read sensor, evaluate schedule, apply control."""
+        area_id = charger.get("area_id", "unknown")
 
-        temp_sensor_id = room.get("temperature_sensor")
+        temp_sensor_id = charger.get("temperature_sensor")
         has_external_sensor = bool(temp_sensor_id)
 
         raw_temp = read_sensor_value(

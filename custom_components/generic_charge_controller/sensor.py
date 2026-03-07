@@ -94,7 +94,7 @@ async def async_setup_entry(
                 entry.unique_id,
                 phases,
                 charger,
-            )
+             )
         ]
     )
 

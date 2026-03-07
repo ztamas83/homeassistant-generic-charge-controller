@@ -87,8 +87,8 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             config={
                 "_panel_custom": {
                     "name": "charge-controller-panel",
-                    "embed_iframe": false,
-                    "trust_external": false,
+                    "embed_iframe": False,
+                    "trust_external": False,
                     "js_url": "/charge-controller/controller-panel.js",
                 }
             },

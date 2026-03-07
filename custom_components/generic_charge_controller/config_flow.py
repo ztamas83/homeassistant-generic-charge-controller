@@ -45,45 +45,55 @@ class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the initial step."""
-
-        self._async_abort_entries_match()
-
+    async def async_step_user(self, user_input=None):
+        """Handle the initial step – just confirm setup."""
         if user_input is not None:
-            charger_device_id = user_input[CONF_CHRG_ID]
-
-            dev_reg = device_registry.async_get(self.hass)
-            charger_device = dev_reg.async_get(charger_device_id)
-
-            errors = {}
-            if not charger_device:
-                errors[CONF_CHRG_ID] = "Device not found"
-
-            if errors:
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=DATA_SCHEMA,
-                    errors=errors,
-                )
-
-            idset = charger_device.identifiers.pop()
-            unique_id = idset[1]
-
-            user_input[CONF_CHRG_DOMAIN] = idset[0]
-
-            await self.async_set_unique_id(unique_id)
+            # Prevent multiple instances
+            await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
+            return self.async_create_entry(title="RoomMind", data={})
 
-            return self.async_create_entry(
-                title=unique_id,
-                data=user_input,
-            )
+        return self.async_show_form(step_id="user")
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=DATA_SCHEMA,
-            errors={},
-        )
+    # async def async_step_user(
+    #     self, user_input: dict[str, Any] | None = None
+    # ) -> FlowResult:
+    #     """Handle the initial step."""
+
+    #     self._async_abort_entries_match()
+
+    #     if user_input is not None:
+    #         charger_device_id = user_input[CONF_CHRG_ID]
+
+    #         dev_reg = device_registry.async_get(self.hass)
+    #         charger_device = dev_reg.async_get(charger_device_id)
+
+    #         errors = {}
+    #         if not charger_device:
+    #             errors[CONF_CHRG_ID] = "Device not found"
+
+    #         if errors:
+    #             return self.async_show_form(
+    #                 step_id="user",
+    #                 data_schema=DATA_SCHEMA,
+    #                 errors=errors,
+    #             )
+
+    #         idset = charger_device.identifiers.pop()
+    #         unique_id = idset[1]
+
+    #         user_input[CONF_CHRG_DOMAIN] = idset[0]
+
+    #         await self.async_set_unique_id(unique_id)
+    #         self._abort_if_unique_id_configured()
+
+    #         return self.async_create_entry(
+    #             title=unique_id,
+    #             data=user_input,
+    #         )
+
+    #     return self.async_show_form(
+    #         step_id="user",
+    #         data_schema=DATA_SCHEMA,
+    #         errors={},
+    #     )

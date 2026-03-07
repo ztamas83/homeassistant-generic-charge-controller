@@ -144,6 +144,10 @@ export interface HassEntityRegistryEntry {
 export interface HassDeviceRegistryEntry {
   id: string;
   area_id: string | null;
+  name: string;
+  serial_number?: string;
+  model?: string;
+  manufacturer?: string;
 }
 
 export interface HassEntity {
