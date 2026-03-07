@@ -1,7 +1,7 @@
 # Generic Charge Controller - Makefile
 #
 # Usage:
-#   make build             - Placeholder build step
+#   make build             - Build the frontend
 #   make deploy            - Deploy to Home Assistant via SSH
 #   make clean             - Remove temporary files
 #
@@ -34,15 +34,15 @@ all: help
 
 help:
 	@echo "Available targets:"
-	@echo "  build             - Placeholder build step"
+	@echo "  build             - Build the frontend (requires npm)"
 	@echo "  deploy            - Deploy to Home Assistant via SSH"
 	@echo "  clean             - Remove temporary files (local __pycache__)"
 	@echo "  test              - Run tests with pytest"
 	@echo "  help              - Show this help message"
 
 build:
-	@echo "==> Building Generic Charge Controller (placeholder)"
-	@# If you have a frontend or assets to build, add those commands here.
+	@echo "==> Building Frontend"
+	cd frontend && npm install && npm run build
 	@echo "    OK"
 
 deploy: build
@@ -56,7 +56,7 @@ deploy: build
 	@echo "    OK"
 	@echo ""
 	@echo "==> Done! Next steps:"
-	@echo "    - Python changes:        Settings -> Integrations -> Generic Charge Controller -> ⋮ -> Reload"
+	@echo "    - Python changes:        Settings -> Integrations -> Charge Controller -> ⋮ -> Reload"
 	@echo "    - WS schema / manifest:  Full HA restart (Settings -> System -> Restart)"
 
 clean:

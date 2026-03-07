@@ -1,27 +1,6 @@
-
 # Generic Charge Controller for Home Assistant
 
-Due to the fact that humidity levels are different during the summer and winter, a static humidity level switching the fan is on/off is not possible. This binary_sensor detects high rises in humidity and switches on. And switches off when the humidity is back to normal.
-
-
-## Setup
-In your `configuration.yaml` you'll need:
-
-
-```
-Next, add some automations to control the charge levels:
-
-```yaml
-automation:
-- alias: some alias
-  trigger:
-    platform: state
-    entity_id: 
-  action:
-    - service: 
-      entity_id: 
-```
-
+This project is for controlling EV charger limits in order to protect the main fuses. This integration runs fully locally and can in theory control any type of charger. The goal is to receive data from any type of utility meter reader.
 
 ## Installation
 
