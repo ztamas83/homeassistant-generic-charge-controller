@@ -1,10 +1,12 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { loadHaElements } from "./load-ha-elements";
 import { getEaseeChargers } from "./utils/charger/easee";
 import "./components/cc-charger-card";
+import "./components/cc-load-balancer-settings";
+import "./components/cc-household-card";
 
-type TabId = "chargers" | "settings";
+type TabId = "chargers" | "households" | "settings";
 
 @customElement("charge-controller-panel")
 export class ChargeControllerPanel extends LitElement {
@@ -17,14 +19,30 @@ export class ChargeControllerPanel extends LitElement {
   @state() private _selectedChargerId: string | null = null;
   @state() private _activeTab: TabId = "chargers";
   @state() private _routeApplied = false;
+  @state() private _configuredHouseholds: Record<string, any> = {};
+  @state() private _configuredChargers: Record<string, any> = {};
 
   protected firstUpdated() {
     this._loadElements();
+    this._loadData();
   }
 
   private async _loadElements() {
     await loadHaElements();
     this._elementsLoaded = true;
+  }
+
+  private async _loadData() {
+    try {
+      this._configuredHouseholds = await this.hass.callWS({
+        type: "generic_charge_controller/households/get",
+      });
+      this._configuredChargers = await this.hass.callWS({
+        type: "generic_charge_controller/chargers/get",
+      });
+    } catch (err) {
+      console.error("Error loading data from Charge Controller backend:", err);
+    }
   }
 
   protected willUpdate(changedProps: Map<string, unknown>) {
@@ -46,8 +64,8 @@ export class ChargeControllerPanel extends LitElement {
       return html`<div class="loading">Loading...</div>`;
     }
 
-    const chargers = getEaseeChargers(this.hass);
     const inDetail = !!this._selectedChargerId;
+    const chargers = getEaseeChargers(this.hass);
     const selectedCharger = inDetail 
       ? chargers.find(c => c.id === this._selectedChargerId)
       : null;
@@ -62,16 +80,37 @@ export class ChargeControllerPanel extends LitElement {
             >
               <ha-icon .icon=${"mdi:arrow-left"}></ha-icon>
             </ha-icon-button>`
-          : ""
+      : nothing
         }
         <div class="title">
           ${inDetail ? selectedCharger?.name ?? "Charger Details" : "Charge Controller"}
         </div>
+        ${!inDetail
+        ? html`
+            <div class="tabs">
+              <div 
+                class="tab ${this._activeTab === "chargers" ? "active" : ""}" 
+                @click=${() => this._activeTab = "chargers"}
+              >
+                Chargers
+              </div>
+              <div 
+                class="tab ${this._activeTab === "households" ? "active" : ""}" 
+                @click=${() => this._activeTab = "households"}
+              >
+                Households
+              </div>
+            </div>
+          `
+        : nothing
+        }
       </div>
       <div class="content">
         ${inDetail 
           ? this._renderDetail(selectedCharger)
-          : this._renderGrid(chargers)
+      : this._activeTab === "chargers"
+        ? this._renderGrid(chargers)
+        : this._renderHouseholds()
         }
       </div>
     `;
@@ -83,7 +122,9 @@ export class ChargeControllerPanel extends LitElement {
         ? html`<p>No Easee chargers detected in your system.</p>`
         : html`
             <div class="grid">
-              ${chargers.map(charger => html`
+              ${chargers.map(charger => {
+                const isConfigured = !!this._configuredChargers[charger.id];
+                return html`
                 <cc-charger-card
                   .chargerId=${charger.id}
                   .name=${charger.name}
@@ -92,10 +133,40 @@ export class ChargeControllerPanel extends LitElement {
                   .power=${charger.power}
                   .currentLimit=${charger.currentLimit}
                   .currentUsage=${charger.currentUsage}
-                  .configured=${charger.configured}
+                  .configured=${isConfigured}
                   @charger-selected=${this._onChargerSelected}
                 ></cc-charger-card>
-              `)}
+              `;
+              })}
+            </div>
+          `}
+    `;
+  }
+
+  private _renderHouseholds() {
+    // Detect "Tibber pulse" devices
+    const tibberPulseDevices = Object.values(this.hass.devices).filter(
+      (device: any) => device.model === "Tibber Pulse"
+    );
+
+    return html`
+      ${tibberPulseDevices.length === 0
+        ? html`<p>No Tibber Pulse devices detected in your system.</p>`
+        : html`
+            <div class="grid">
+              ${tibberPulseDevices.map((device: any) => {
+          const name = device.name.replace(/Tibber Pulse/gi, "").trim() || device.name;
+          const isConfigured = !!this._configuredHouseholds[device.id];
+          return html`
+                  <cc-household-card
+                    .deviceId=${device.id}
+                    .name=${name}
+                    .enabled=${isConfigured}
+                    @household-enabled=${this._onHouseholdEnabled}
+                    @household-removed=${this._onHouseholdRemoved}
+                  ></cc-household-card>
+                `;
+        })}
             </div>
           `}
     `;
@@ -105,6 +176,8 @@ export class ChargeControllerPanel extends LitElement {
     if (!charger) {
       return html`<p>Charger not found.</p>`;
     }
+
+    const isConfigured = !!this._configuredChargers[charger.id];
 
     return html`
       <div class="detail-view">
@@ -116,14 +189,15 @@ export class ChargeControllerPanel extends LitElement {
           .power=${charger.power}
           .currentLimit=${charger.currentLimit}
           .currentUsage=${charger.currentUsage}
-          .configured=${charger.configured}
+          .configured=${isConfigured}
         ></cc-charger-card>
 
-        <ha-card header="Load Balancing Settings">
-          <div class="card-content">
-            <p>Placeholder for load balancing configuration.</p>
-          </div>
-        </ha-card>
+        <cc-load-balancer-settings
+          .hass=${this.hass}
+          .chargerId=${charger.id}
+          .households=${this._configuredHouseholds}
+          @config-saved=${this._loadData}
+        ></cc-load-balancer-settings>
 
         <ha-card header="Statistics">
           <div class="card-content">
@@ -144,9 +218,41 @@ export class ChargeControllerPanel extends LitElement {
     this._navigate("");
   }
 
-  private _onChargerSelected(e: any) {
+  private _onChargerSelected(e: CustomEvent<{ chargerId: string }>) {
     this._selectedChargerId = e.detail.chargerId;
     this._navigate(`/charger/${e.detail.chargerId}`);
+  }
+
+  private async _onHouseholdEnabled(e: CustomEvent<{ deviceId: string }>) {
+    console.log(`Enable household for device: ${e.detail.deviceId}`);
+    try {
+      const household = await this.hass.callWS({
+        type: "generic_charge_controller/households/save",
+        device_id: e.detail.deviceId,
+        config: { enabled: true }
+      });
+      this._configuredHouseholds = {
+        ...this._configuredHouseholds,
+        [e.detail.deviceId]: household
+      };
+    } catch (err) {
+      console.error("Error saving household:", err);
+    }
+  }
+
+  private async _onHouseholdRemoved(e: CustomEvent<{ deviceId: string }>) {
+    console.log(`Household removed for device: ${e.detail.deviceId}`);
+    try {
+      await this.hass.callWS({
+        type: "generic_charge_controller/households/delete",
+        device_id: e.detail.deviceId,
+      });
+      const newHouseholds = { ...this._configuredHouseholds };
+      delete newHouseholds[e.detail.deviceId];
+      this._configuredHouseholds = newHouseholds;
+    } catch (err) {
+      console.error("Error deleting household:", err);
+    }
   }
 
   private _applyRoute() {
@@ -176,6 +282,32 @@ export class ChargeControllerPanel extends LitElement {
       color: var(--app-header-text-color, var(--primary-text-color));
       border-bottom: 1px solid var(--divider-color);
       font-size: 20px;
+    }
+
+    .toolbar .title {
+      flex: 1;
+    }
+
+    .tabs {
+      display: flex;
+      height: 100%;
+      align-items: center;
+    }
+
+    .tab {
+      padding: 0 16px;
+      cursor: pointer;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      font-size: 16px;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      border-bottom-color: var(--primary-color);
+      color: var(--primary-color);
     }
 
     .content {

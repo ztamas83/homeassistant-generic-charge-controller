@@ -54,7 +54,12 @@ export class CcChargerCard extends LitElement {
              <div class="progress" style="width: ${Math.min(100, (this.currentUsage / this.currentLimit) * 100)}%"></div>
           </div>
         </div>
-        <!-- Future action buttons can be added here -->
+        <div class="card-actions">
+          ${this.configured
+            ? html`<ha-button>Details</ha-button>`
+            : html`<ha-button class="warning">Configure</ha-button>`
+          }
+        </div>
       </ha-card>
     `;
   }

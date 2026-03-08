@@ -66,4 +66,4 @@ clean:
 
 test:
 	@echo "==> Running tests"
-	pytest
+	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/; else pytest tests/; fi
