@@ -9,6 +9,9 @@ export class CcLoadBalancerSettings extends LitElement {
   @property({ attribute: false }) public households: Record<string, any> = {};
 
   @state() private _selectedHouseholdId = "";
+  @state() private _house_l1 = "cl1";
+  @state() private _house_l2 = "cl2";
+  @state() private _house_l3 = "cl3";
 
   protected firstUpdated() {
     this._loadConfig();
@@ -22,6 +25,9 @@ export class CcLoadBalancerSettings extends LitElement {
       const config = chargers[this.chargerId];
       if (config) {
         this._selectedHouseholdId = config.household_id || "";
+        this._house_l1 = config.house_l1 || "cl1";
+        this._house_l2 = config.house_l2 || "cl2";
+        this._house_l3 = config.house_l3 || "cl3";
       }
     } catch (err) {
       console.error("Error loading charger config:", err);
@@ -64,6 +70,31 @@ export class CcLoadBalancerSettings extends LitElement {
               })}
             </select>
           </div>
+
+          ${this._selectedHouseholdId ? html`
+            <div class="phase-mapping">
+              <p class="description">
+                Map your home's phases to the phases on the charger.
+              </p>
+              
+              ${[1, 2, 3].map(i => {
+                const val = (this as any)[`_house_l${i}`];
+                return html`
+                  <div class="settings-row phase-row">
+                    <span class="label">Home L${i}:</span>
+                    <select 
+                      .value=${val}
+                      @change=${(e: any) => (this as any)[`_house_l${i}`] = e.target.value}
+                    >
+                      <option value="cl1" ?selected=${val === "cl1"}>Charger L1</option>
+                      <option value="cl2" ?selected=${val === "cl2"}>Charger L2</option>
+                      <option value="cl3" ?selected=${val === "cl3"}>Charger L3</option>
+                    </select>
+                  </div>
+                `;
+              })}
+            </div>
+          ` : nothing}
         </div>
         <div class="card-actions">
            <ha-button 
@@ -84,6 +115,9 @@ export class CcLoadBalancerSettings extends LitElement {
         charger_id: this.chargerId,
         config: {
           household_id: this._selectedHouseholdId,
+          house_l1: this._house_l1,
+          house_l2: this._house_l2,
+          house_l3: this._house_l3,
         }
       });
       
@@ -113,6 +147,19 @@ export class CcLoadBalancerSettings extends LitElement {
       margin-bottom: 16px;
     }
 
+    .phase-row {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .phase-row .label {
+      margin-bottom: 0;
+      white-space: nowrap;
+      min-width: 80px;
+    }
+
     .label {
       font-weight: 500;
       margin-bottom: 8px;
@@ -126,6 +173,12 @@ export class CcLoadBalancerSettings extends LitElement {
       background-color: var(--card-background-color);
       color: var(--primary-text-color);
       font-size: 16px;
+    }
+
+    .phase-mapping {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--divider-color);
     }
 
     .card-actions {

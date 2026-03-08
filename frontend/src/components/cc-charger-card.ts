@@ -1,7 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { mdiScaleBalance, mdiScaleBalanceOff } from "../utils/icons";
-import { modeStyles } from "../styles/shared-mode-styles";
 
 @customElement("cc-charger-card")
 export class CcChargerCard extends LitElement {
@@ -12,6 +11,9 @@ export class CcChargerCard extends LitElement {
   @property({ type: Number }) public power = 0;
   @property({ type: Number }) public currentLimit = 0;
   @property({ type: Number }) public currentUsage = 0;
+  @property({ type: Number }) public l1Usage = 0;
+  @property({ type: Number }) public l2Usage = 0;
+  @property({ type: Number }) public l3Usage = 0;
   @property({ type: Boolean }) public configured = false;
 
   protected render() {
@@ -43,12 +45,12 @@ export class CcChargerCard extends LitElement {
             <span class="value">${this.power.toFixed(1)} kW</span>
           </div>
           <div class="row">
-            <span class="label">Current Limit:</span>
-            <span class="value">${this.currentLimit} A</span>
+            <span class="label">Usage (L1/L2/L3):</span>
+            <span class="value">${this.l1Usage.toFixed(1)} / ${this.l2Usage.toFixed(1)} / ${this.l3Usage.toFixed(1)} A</span>
           </div>
           <div class="row">
-            <span class="label">Current Usage:</span>
-            <span class="value">${this.currentUsage.toFixed(1)} A</span>
+            <span class="label">Current Limit:</span>
+            <span class="value">${this.currentLimit} A</span>
           </div>
           <div class="progress-bar">
              <div class="progress" style="width: ${Math.min(100, (this.currentUsage / this.currentLimit) * 100)}%"></div>
@@ -169,14 +171,8 @@ export class CcChargerCard extends LitElement {
       background: transparent;
     }
     
-    /* Configure prompt for unconfigured areas */
-    .configure-prompt {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--divider-color, #eee);
+    .warning {
+      --mdc-theme-primary: var(--error-color);
     }
   `;
 }

@@ -133,6 +133,9 @@ export class ChargeControllerPanel extends LitElement {
                   .power=${charger.power}
                   .currentLimit=${charger.currentLimit}
                   .currentUsage=${charger.currentUsage}
+                  .l1Usage=${charger.l1_usage}
+                  .l2Usage=${charger.l2_usage}
+                  .l3Usage=${charger.l3_usage}
                   .configured=${isConfigured}
                   @charger-selected=${this._onChargerSelected}
                 ></cc-charger-card>
@@ -189,6 +192,9 @@ export class ChargeControllerPanel extends LitElement {
           .power=${charger.power}
           .currentLimit=${charger.currentLimit}
           .currentUsage=${charger.currentUsage}
+          .l1Usage=${charger.l1_usage}
+          .l2Usage=${charger.l2_usage}
+          .l3Usage=${charger.l3_usage}
           .configured=${isConfigured}
         ></cc-charger-card>
 

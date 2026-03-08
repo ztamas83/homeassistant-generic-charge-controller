@@ -9,6 +9,9 @@ export interface ChargerData {
   currentLimit: number;
   currentUsage: number;
   configured: boolean;
+  l1_usage: number;
+  l2_usage: number;
+  l3_usage: number;
 }
 
 /**
@@ -49,16 +52,23 @@ export const getEaseeChargers = (hass: HomeAssistant): ChargerData[] => {
       return map;
     }, new Map<string, HassEntity>());
 
-    console.log(`State map for device ${deviceId}: `, stateMap);
-
     const getSensorEntityId = (suffix: string) => {
       return `sensor.${device.name?.toLowerCase().replace(/\s+/g, "_")}_${suffix}`;
     }
 
-    // Find status and power sensors
+    // Find status, power, and circuit current sensors
     const status = stateMap.get(getSensorEntityId("status"))?.state || "Unknown";
     const power = parseFloat(stateMap.get(getSensorEntityId("power"))?.state || "0");
     const currentLimit = parseFloat(stateMap.get(getSensorEntityId("max_circuit_limit"))?.state || "0");
+    
+    const circuitCurrentEntity = stateMap.get(getSensorEntityId("circuit_current"));
+    let l1 = 0, l2 = 0, l3 = 0;
+    
+    if (circuitCurrentEntity) {
+      l1 = parseFloat(circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL1 as any) || 0;
+      l2 = parseFloat(circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL2 as any) || 0;
+      l3 = parseFloat(circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL3 as any) || 0;
+    }
 
     chargers.push({
       id: deviceId,
@@ -67,7 +77,10 @@ export const getEaseeChargers = (hass: HomeAssistant): ChargerData[] => {
       status: status,
       power: power,
       currentLimit: currentLimit,
-      currentUsage: (power * 1000) / 230, // Simplified conversion for display
+      currentUsage: Math.max(l1, l2, l3), // Total usage as max of phases
+      l1_usage: l1,
+      l2_usage: l2,
+      l3_usage: l3,
       configured: false, // To be implemented later (check store)
     });
 
