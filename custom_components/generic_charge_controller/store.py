@@ -1,8 +1,9 @@
-"""Room persistence layer for RoomMind."""
+"""Persistence layer for ChargeController."""
 
 from __future__ import annotations
 
 import copy
+import logging
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -10,52 +11,107 @@ from homeassistant.helpers.storage import Store
 from .const import (
     DOMAIN,
     STORE_KEY_CHARGERS,
+    STORE_KEY_HOUSEHOLDS,
     STORE_KEY_MEASUREMENT_DATA,
     STORE_KEY_SETTINGS
 )
 
-from .abstract_charger import ChargerConfiguration
-
-
 STORAGE_VERSION = 1
 STORAGE_KEY = DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
 
 class ChargeControllerStore:
-    """Manage charger configuration storage for ChargeController."""
+    """Manage configuration storage for ChargeController."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialise the store."""
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self._data: dict[str, dict] = {}
+        self._chargers: dict[str, dict] = {}
+        self._households: dict[str, dict] = {}
         self._settings: dict = {}
         self._measurement_data: dict = {}
 
     async def async_load(self) -> None:
         """Load store data from the HA store."""
         stored = await self._store.async_load()
-        
-        self._data = stored.get(STORE_KEY_CHARGERS, {}) if stored else {}
-        self._settings = stored.get(STORE_KEY_SETTINGS, {}) if stored else {}
-        self._measurement_data = stored.get(STORE_KEY_MEASUREMENT_DATA, {}) if stored else {}
+        if stored:
+            self._chargers = stored.get(STORE_KEY_CHARGERS, {})
+            self._households = stored.get(STORE_KEY_HOUSEHOLDS, {})
+            self._settings = stored.get(STORE_KEY_SETTINGS, {})
+            self._measurement_data = stored.get(STORE_KEY_MEASUREMENT_DATA, {})
+        else:
+            self._chargers = {}
+            self._households = {}
+            self._settings = {}
+            self._measurement_data = {}
 
     async def _async_save(self) -> None:
-        """Persist current charger data to the HA store."""
-        await self._store.async_save({STORE_KEY_CHARGERS: self._data, STORE_KEY_SETTINGS: self._settings, STORE_KEY_MEASUREMENT_DATA: self._measurement_data})
+        """Persist current data to the HA store."""
+        await self._store.async_save({
+            STORE_KEY_CHARGERS: self._chargers,
+            STORE_KEY_HOUSEHOLDS: self._households,
+            STORE_KEY_SETTINGS: self._settings, 
+            STORE_KEY_MEASUREMENT_DATA: self._measurement_data
+        })
 
+    # Charger operations
     def get_chargers(self) -> dict[str, dict]:
         """Return a deep copy of all chargers."""
-        chargers = copy.deepcopy(dict(self._data))
-        return chargers
+        return copy.deepcopy(dict(self._chargers))
 
     def get_charger(self, charger_id: str) -> dict | None:
-        """Return a deep copy of a single charger by ID, or None if not found."""
-        charger = self._data.get(charger_id)
+        """Return a deep copy of a single charger by ID."""
+        charger = self._chargers.get(charger_id)
         if charger is None:
             return None
-        result = copy.deepcopy(charger)
-        return result
+        return copy.deepcopy(charger)
 
+    async def async_save_charger(self, charger_id: str, config: dict) -> dict:
+        """Create or update charger configuration."""
+        if charger_id in self._chargers:
+            self._chargers[charger_id].update(config)
+        else:
+            self._chargers[charger_id] = {"charger_id": charger_id, **config}
+        
+        await self._async_save()
+        return copy.deepcopy(self._chargers[charger_id])
+
+    async def async_delete_charger(self, charger_id: str) -> None:
+        """Delete a charger."""
+        if charger_id in self._chargers:
+            del self._chargers[charger_id]
+            await self._async_save()
+
+    # Household operations
+    def get_households(self) -> dict[str, dict]:
+        """Return a deep copy of all households."""
+        return copy.deepcopy(dict(self._households))
+
+    def get_household(self, device_id: str) -> dict | None:
+        """Return a deep copy of a single household by device ID."""
+        household = self._households.get(device_id)
+        if household is None:
+            return None
+        return copy.deepcopy(household)
+
+    async def async_save_household(self, device_id: str, config: dict) -> dict:
+        """Create or update household configuration."""
+        if device_id in self._households:
+            self._households[device_id].update(config)
+        else:
+            self._households[device_id] = {"device_id": device_id, **config}
+        
+        await self._async_save()
+        return copy.deepcopy(self._households[device_id])
+
+    async def async_delete_household(self, device_id: str) -> None:
+        """Delete a household."""
+        if device_id in self._households:
+            del self._households[device_id]
+            await self._async_save()
+
+    # Settings operations
     def get_settings(self) -> dict:
         """Return a deep copy of global settings."""
         return copy.deepcopy(dict(self._settings))
@@ -64,8 +120,9 @@ class ChargeControllerStore:
         """Merge changes into global settings and persist."""
         self._settings.update(changes)
         await self._async_save()
-        return dict(self._settings)
+        return copy.deepcopy(dict(self._settings))
 
+    # Measurement data operations
     def get_measurement_data(self) -> dict:
         """Return a deep copy of measurement data."""
         return copy.deepcopy(dict(self._measurement_data))
@@ -73,76 +130,4 @@ class ChargeControllerStore:
     async def async_save_measurement_data(self, data: dict) -> None:
         """Replace measurement data and persist."""
         self._measurement_data = data
-        await self._async_save()
-
-    async def async_clear_measurement_data_room(self, area_id: str) -> None:
-        """Clear measurement data for a single room."""
-        self._measurement_data.pop(area_id, None)
-        await self._async_save()
-
-    async def async_clear_all_measurement_data(self) -> None:
-        """Clear all measurement data."""
-        self._measurement_data = {}
-        await self._async_save()
-
-    async def async_save_charger(self, charger: ChargerConfiguration) -> dict:
-        """Create or update charger configuration for a charger."""
-        charger_id = charger.charger_id
-        if charger_id in self._data:
-            # Update existing
-            existing = self._data[charger_id]
-            for key, value in charger.items():
-                if key != "charger_id":
-                    existing[key] = value
-                        
-            await self._async_save()
-            return existing
-        else:
-            # Create new 
-            charger = {
-                "charger_id": charger_id,
-                # "area_id": area_id,
-                # "charger_id": charger_id,
-                # "thermostats": config.get("thermostats", []),
-                # "acs": config.get("acs", []),
-                # "temperature_sensor": config.get("temperature_sensor", ""),
-                # "humidity_sensor": config.get("humidity_sensor", ""),
-                # "climate_mode": config.get("climate_mode", "auto"),
-                # "schedules": config.get("schedules", []),
-                # "schedule_selector_entity": config.get("schedule_selector_entity", ""),
-                # "window_sensors": config.get("window_sensors", []),
-                # "window_open_delay": config.get("window_open_delay", 0),
-                # "window_close_delay": config.get("window_close_delay", 0),
-                # "comfort_temp": comfort_heat,
-                # "eco_temp": eco_heat,
-                # "comfort_heat": comfort_heat,
-                # "comfort_cool": config.get("comfort_cool", DEFAULT_COMFORT_COOL),
-                # "eco_heat": eco_heat,
-                # "eco_cool": config.get("eco_cool", DEFAULT_ECO_COOL),
-                # "presence_persons": config.get("presence_persons", []),
-                # "display_name": config.get("display_name", ""),
-                # "heating_system_type": config.get("heating_system_type", ""),
-            }
-            self._data[charger_id] = charger
-            await self._async_save()
-            return charger
-
-    async def async_update_charger(self, charger_id: str, changes: dict) -> dict:
-        """Merge changes into an existing charger. Raises KeyError if not found."""
-        if charger_id not in self._data:
-            raise KeyError(f"Charger '{charger_id}' not found")
-
-        # Prevent overriding the charger_id
-        changes.pop("charger_id", None)
-
-        self._data[charger_id].update(changes)
-        await self._async_save()
-        return self._data[charger_id]
-
-    async def async_delete_charger(self, charger_id: str) -> None:
-        """Delete a charger. Raises KeyError if not found."""
-        if charger_id not in self._data:
-            raise KeyError(f"Charger '{charger_id}' not found")
-
-        del self._data[charger_id]
         await self._async_save()

@@ -5,10 +5,10 @@ DATA_HASS_CONFIG = "generic_charger_hass_config"
 DOMAIN = "generic_charge_controller"
 VERSION = "0.0.1"
 
-PHASE_TMP = "P%s"
-PHASE1 = "P1"
-PHASE2 = "P2"
-PHASE3 = "P3"
+PHASE_TMP = "l%s"
+PHASE1 = "l1"
+PHASE2 = "l2"
+PHASE3 = "l3"
 
 CONF_ENTITYID_CURR_L1 = "current_sensor_phase1"
 CONF_ENTITYID_CURR_L2 = "current_sensor_phase2"
@@ -28,6 +28,7 @@ ATTR_LIMIT_Px = "Current limit %s"
 
 # Store keys
 STORE_KEY_CHARGERS = "chargers"
+STORE_KEY_HOUSEHOLDS = "households"
 STORE_KEY_SETTINGS = "settings"
 STORE_KEY_MEASUREMENT_DATA = "measurement_data"
 

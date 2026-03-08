@@ -18,14 +18,17 @@ from .const import (
     VERSION
 )
 
+from .store import ChargeControllerStore
+from .coordinator import ChargeControllerCoordinator
 from .websocket_api import async_register_websocket_commands
 
 from homeassistant.components.frontend import (
     async_register_built_in_panel,
+    async_remove_panel,
 )
 
 PLATFORMS = [Platform.SENSOR]
-CONFIG_SCHEMA = cv.removed(DOMAIN, raise_if_present=False)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,18 +36,45 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the generic_charge_controller component."""
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DATA_HASS_CONFIG] = config.get(DOMAIN)
+    _LOGGER.info("Setting up generic_charge_controller component")
 
     async_register_websocket_commands(hass)
-    await _async_register_panel(hass)
     return True
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a config entry."""
-    hass.data.setdefault(DOMAIN, {})
+    _LOGGER.info("Setting up generic_charge_controller entry: %s", entry.entry_id)
+
+    # Ensure store is initialized even if async_setup was somehow skipped or called differently
+    if "store" not in hass.data[DOMAIN]:
+        store = ChargeControllerStore(hass)
+        await store.async_load()
+        hass.data[DOMAIN]["store"] = store
+
+    # Coordinator
+    coordinator = ChargeControllerCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][
+        "coordinator"
+    ] = coordinator  # For easy access in websocket handlers
+
+    if not hass.data[DOMAIN].get("websocket_registered"):
+        async_register_websocket_commands(hass)
+        hass.data[DOMAIN]["websocket_registered"] = True
+
     await _async_register_panel(hass)
+    _LOGGER.info(
+        "Forwarding entry setups for entry %s to platforms: %s",
+        entry.entry_id,
+        PLATFORMS,
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    _LOGGER.info(
+        "Setup complete for generic_charge_controller entry: %s", entry.entry_id
+    )
     return True
 
 
@@ -53,6 +83,15 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )
+
+    if unload_ok:
+        hass.data[DOMAIN].pop(config_entry.entry_id)
+        hass.data[DOMAIN].pop("coordinator", None)
+
+    # Remove panel if no entries remain
+    if not hass.data[DOMAIN]:
+        async_remove_panel(hass, "roommind")
+
     return unload_ok
 
 
