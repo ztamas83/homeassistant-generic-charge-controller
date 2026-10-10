@@ -5,7 +5,7 @@
     "dependencies": [],
     "after_dependencies": ["easee", "tibber"],
     "codeowners": ["@ztamas83"],
-    "requirements": ["numpy"],
+    "requirements": [],
     "version": "0.1.0",
     "iot_class": "calculated",
     "config_flow": true

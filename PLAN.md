@@ -69,7 +69,7 @@ Verify:
 - HA: configure household in panel, restart, config persists; load sensors match meter sensors.
 
 ### Step 2: Safe calculation in shadow mode (no actuation)
-Status: [ ] not started
+Status: [x] implemented 2026-10-10, awaiting verification in HA
 
 Changes:
 - Charger factory + read-only Easee adapter (phase currents, status, circuit max via entity registry); `phase_map` maps charger phases to household phases.
@@ -154,12 +154,17 @@ Verify:
 
 ## Notes for later steps
 
-- Step 1 left in place for step 2: `loadbalancer/*` calculators, `abstract_charger.py`, `easee/charger.py` (not used at runtime yet).
+- Step 3: Easee (v0.9.74 on the user's HA) service `easee.set_circuit_dynamic_limit` takes `device_id`, `current_p1` (required), `current_p2`, `current_p3` (0-40 A) and `time_to_live`. The old `update_limits` sent `currentP1..3`, which is wrong. Check the TTL unit in `services.py` (`SERVICE_SET_CIRCUIT_CURRENT_SCHEMA_TTL`) before use.
+- Step 3: Easee `circuit_current` (phase currents) is disabled by default in the Easee integration; without it the balancer assumes 0 A charger current (safe, but targets drop while charging). Show a hint in the panel.
+- Step 6: `make deploy` extracts over the remote folder and never deletes removed files (e.g. old `loadbalancer/calculator.py` stays on HA). Switch to a clean copy.
 - Step 6: `manifest.json` should list `http`, `frontend`, `websocket_api` as dependencies; unused imports in `__init__.py` (`json`, `DATA_HASS_CONFIG`, `VERSION`); old `CONF_*` constants and commented config flow in `config_flow.py`.
-- Easee discovery matches entities by unique id `<serial>_<key>`, falling back to the entity id suffix. Confirm against the real Easee integration in HA.
+- Easee discovery matches entities by unique id `<serial>_<key>`, confirmed in Easee v0.9.74 (`entity.py`: `f"{product.id}_{entity_name}"`).
+- Defaults in `const.py` (margin 1 A, ramp 2 A/min, stale after 120 s, min 6 A) become settings in step 5.
 
 ## Log
 
 - 2026-10-10: Gap analysis done. Test env rebuilt (`.venv`, `pytest-homeassistant-custom-component`, `pytest.ini`); all 9 tests pass. Coordinator test now injects `AdvancedCalculator`; runtime default is still `LoggingCalculator` (fixed in step 2).
 - 2026-10-10: Step 1 implemented. Store v2 (v1 discarded), validated WS API incl. `chargers/discover`, reload on config change, stale entity/device cleanup, household load sensors (A/mA only, unavailable when source untrusted), charger target/mode sensors (idle, unknown targets), household editor and charger settings with `ha-form`. 43 tests pass, `make build` OK.
 - 2026-10-10: Panel JS URL carries a content hash (no stale browser cache after deploy). Households tab first; chargers grouped per household. 44 tests pass.
+- 2026-10-10: Step 2 implemented. `SafeLoadBalancer` (fail-safe 0 A on unknown/stale household load, unknown charger current assumed 0 A, load rounded up, immediate decrease, 2 A/min ramp-up, whole-ampere targets capped at circuit rated current, below 6 A -> 0). Read-only Easee adapter by unique id, charger factory, shared `readings.read_current_a` with staleness via `last_reported`. Sensors: target and charger current per charger phase, mode (idle/charging/limited/failsafe) with `reasons` attribute. Old calculators and numpy removed. 73 tests pass.
+- 2026-10-10: Panel: charger cards show target currents P1-P3 and load balancing mode; charger detail shows history of targets and mode (own SVG step chart from `history/history_during_period`, 6 h to 7 d, tooltip, table view; HA history-graph card is not usable because `window.loadCardHelpers` is undefined in a custom panel). New WS `entities` returns sensor entity ids per household/charger. 74 tests pass.

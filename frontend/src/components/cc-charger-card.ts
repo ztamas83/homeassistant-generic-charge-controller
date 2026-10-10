@@ -15,6 +15,14 @@ export class CcChargerCard extends LitElement {
   @property({ type: Number }) public l2Usage = 0;
   @property({ type: Number }) public l3Usage = 0;
   @property({ type: Boolean }) public configured = false;
+  /** Calculated target current per charger phase P1-P3; null when unknown. */
+  @property({ attribute: false }) public targets: (number | null)[] | null = null;
+  /** Load balancing mode (idle, charging, limited, failsafe); null when unknown. */
+  @property() public mode: string | null = null;
+
+  private _formatTarget(value: number | null) {
+    return value === null ? "–" : value.toFixed(0);
+  }
 
   protected render() {
     const accentClass = this.configured
@@ -45,9 +53,20 @@ export class CcChargerCard extends LitElement {
             <span class="value">${this.power.toFixed(1)} kW</span>
           </div>
           <div class="row">
-            <span class="label">Usage (L1/L2/L3):</span>
+            <span class="label">Usage (P1/P2/P3):</span>
             <span class="value">${this.l1Usage.toFixed(1)} / ${this.l2Usage.toFixed(1)} / ${this.l3Usage.toFixed(1)} A</span>
           </div>
+          ${this.configured && this.targets
+            ? html`
+              <div class="row">
+                <span class="label">Target (P1/P2/P3):</span>
+                <span class="value">${this.targets.map((t) => this._formatTarget(t)).join(" / ")} A</span>
+              </div>
+              <div class="row">
+                <span class="label">Load balancing:</span>
+                <span class="value mode ${this.mode ?? ""}">${this.mode ?? "unknown"}</span>
+              </div>`
+            : ""}
           <div class="row">
             <span class="label">Current Limit:</span>
             <span class="value">${this.currentLimit} A</span>
@@ -122,6 +141,14 @@ export class CcChargerCard extends LitElement {
 
     .status.charging {
       color: var(--success-color, #4caf50);
+    }
+
+    .mode.limited {
+      color: var(--warning-color, #ff9800);
+    }
+
+    .mode.failsafe {
+      color: var(--error-color);
     }
 
     .status.idle {

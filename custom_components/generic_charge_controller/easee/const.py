@@ -36,6 +36,7 @@ S_NAME_STATUS = "status"
 S_NAME_POWER = "power"
 S_NAME_MAX_CIRCUIT_LIMIT = "max_circuit_limit"
 ATTR_PHASE_CURRENT_TMP = "state_circuitTotalPhaseConductorCurrentL%s"
+ATTR_CIRCUIT_RATED_CURRENT = "circuit_ratedCurrent"  # attribute of the status sensor
 
 
 EA_DISCONNECTED = "disconnected"

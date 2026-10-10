@@ -194,3 +194,28 @@ async def test_discover_chargers(hass, ws, easee_device):
             },
         }
     ]
+
+
+async def test_entities(hass, ws, easee_device):
+    """Entity ids of the integration's sensors are returned per household and charger."""
+    household_id = await _create_household(ws)
+    await ws(
+        "chargers/save",
+        charger_id=easee_device.id,
+        config={"type": "easee", "household_id": household_id, "phase_map": PHASE_MAP},
+    )
+    await hass.async_block_till_done()
+
+    result = (await ws("entities"))["result"]
+
+    assert result["households"] == {
+        household_id: {
+            "L1": "sensor.home_load_l1",
+            "L2": "sensor.home_load_l2",
+            "L3": "sensor.home_load_l3",
+        }
+    }
+    charger = result["chargers"][easee_device.id]
+    assert charger["target_current_P1"] == "sensor.garage_charger_load_balancing_target_current_p1"
+    assert charger["charger_current_P3"] == "sensor.garage_charger_load_balancing_charger_current_p3"
+    assert charger["mode"] == "sensor.garage_charger_load_balancing_mode"

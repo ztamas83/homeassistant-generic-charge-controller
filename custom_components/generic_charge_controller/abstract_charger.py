@@ -1,38 +1,21 @@
 """Abstract class for a charger"""
 
+from __future__ import annotations
+
 import abc
 
 
-class ChargerConfiguration:
-    @property
-    def charger_id(self) -> str:
-        """Unique ID for the charger, e.g. "easee_living_room" or "detected_charger_1"."""
-        pass
-
-class AbstractCharger:
-    @abc.abstractmethod
-    def start(self) -> None:
-        pass
+class AbstractCharger(abc.ABC):
+    """Read access to a charger. Phases are the charger's own phases P1-P3."""
 
     @abc.abstractmethod
-    def stop(self) -> None:
-        pass
+    def phase_currents(self) -> dict[str, float | None]:
+        """Current drawn per charger phase in ampere, None if unknown."""
 
     @abc.abstractmethod
-    def update_limits(self, phases: dict[str, float]) -> None:
-        pass
+    def is_charging(self) -> bool:
+        """True while the charger delivers current to the car."""
 
-    @property
     @abc.abstractmethod
-    def phase_currents(self) -> dict[str, float]:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def rated_current(self) -> float:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def charging(self) -> bool:
-        pass
+    def max_current(self) -> float | None:
+        """Highest current per phase the charger may be set to, None if unknown."""

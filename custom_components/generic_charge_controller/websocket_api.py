@@ -11,6 +11,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CH_HOUSEHOLD,
@@ -27,6 +28,7 @@ from .const import (
     PHASES,
 )
 from .easee.discovery import async_discover_easee_chargers
+from .unique_ids import CHARGER_DATA_KEYS, charger_unique_id, household_load_unique_id
 
 if TYPE_CHECKING:
     from homeassistant.components.websocket_api import ActiveConnection
@@ -95,6 +97,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, websocket_get_settings)
     websocket_api.async_register_command(hass, websocket_save_settings)
+
+    websocket_api.async_register_command(hass, websocket_get_entities)
 
 
 # Charger commands
@@ -290,3 +294,48 @@ async def websocket_save_settings(
     """Save global settings."""
     settings = await _get_store(hass).async_save_settings(msg["changes"])
     connection.send_result(msg["id"], settings)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/entities",
+    }
+)
+@callback
+def websocket_get_entities(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Return entity ids of the sensors per household and charger.
+
+    Values are keyed like the coordinator data (e.g. "target_current_P1", "mode",
+    "L1"). Sensors that are not registered are left out.
+    """
+    store = _get_store(hass)
+    ent_reg = er.async_get(hass)
+
+    def lookup(keys_to_unique_ids: dict[str, str]) -> dict[str, str]:
+        result = {}
+        for key, unique_id in keys_to_unique_ids.items():
+            if entity_id := ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
+                result[key] = entity_id
+        return result
+
+    connection.send_result(
+        msg["id"],
+        {
+            "households": {
+                household_id: lookup(
+                    {p: household_load_unique_id(household_id, p) for p in PHASES}
+                )
+                for household_id in store.get_households()
+            },
+            "chargers": {
+                charger_id: lookup(
+                    {k: charger_unique_id(charger_id, k) for k in CHARGER_DATA_KEYS}
+                )
+                for charger_id in store.get_chargers()
+            },
+        },
+    )

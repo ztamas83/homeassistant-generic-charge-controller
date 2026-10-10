@@ -128,3 +128,31 @@ async def setup_integration(hass) -> MockConfigEntry:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return entry
+
+
+def set_easee_states(
+    hass,
+    currents: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    status: str = "charging",
+    rated_current: float | None = 16,
+) -> None:
+    """Set states of the Easee entities registered by the easee_device fixture."""
+    status_attrs = {"circuit_ratedCurrent": rated_current} if rated_current is not None else {}
+    hass.states.async_set("sensor.garage_charger_status", status, status_attrs)
+    hass.states.async_set(
+        "sensor.garage_charger_circuit_current",
+        str(max(currents)),
+        {
+            "unit_of_measurement": "A",
+            **{
+                f"state_circuitTotalPhaseConductorCurrentL{i}": value
+                for i, value in enumerate(currents, start=1)
+            },
+        },
+    )
+
+
+def set_meter_states(hass, l1, l2, l3) -> None:
+    """Set the household meter phase sensors used by HOUSEHOLD_CONFIG."""
+    for phase, value in (("l1", l1), ("l2", l2), ("l3", l3)):
+        hass.states.async_set(f"sensor.meter_{phase}", str(value), {"unit_of_measurement": "A"})
