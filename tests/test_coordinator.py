@@ -1,13 +1,16 @@
 """Tests for ChargeControllerCoordinator."""
-from unittest.mock import MagicMock
+import logging
 import pytest
 from custom_components.generic_charge_controller.coordinator import ChargeControllerCoordinator
 from custom_components.generic_charge_controller.const import DOMAIN
+from custom_components.generic_charge_controller.loadbalancer.advanced_calculator import AdvancedCalculator
+
+_LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 async def test_coordinator_load_balancing(hass, mock_config_entry, mock_store):
     """Test coordinator load balancing logic with refactored config."""
-    hass.data[DOMAIN]["store"] = mock_store
+    hass.data.setdefault(DOMAIN, {})["store"] = mock_store
     
     # Setup mock store data with new structure
     mock_store.get_chargers.return_value = {
@@ -29,25 +32,19 @@ async def test_coordinator_load_balancing(hass, mock_config_entry, mock_store):
         }
     }
     
-    # Setup mock states
-    def get_state(entity_id):
-        if entity_id == "sensor.house_l1":
-            return MagicMock(state="10.0")
-        if entity_id == "sensor.house_l2":
-            return MagicMock(state="5.0")
-        if entity_id == "sensor.house_l3":
-            return MagicMock(state="2.0")
-        if entity_id == "sensor.easee":
-            return MagicMock(state="online", attributes={
-                "phase 1": 8.0,
-                "phase 2": 4.0,
-                "phase 3": 0.0
-            })
-        return None
+    # Setup states
+    hass.states.async_set("sensor.house_l1", "10.0")
+    hass.states.async_set("sensor.house_l2", "5.0")
+    hass.states.async_set("sensor.house_l3", "2.0")
+    hass.states.async_set("sensor.easee", "online", {
+        "phase 1": 8.0,
+        "phase 2": 4.0,
+        "phase 3": 0.0
+    })
 
-    hass.states.get.side_effect = get_state
-    
-    coordinator = ChargeControllerCoordinator(hass, mock_config_entry)
+    coordinator = ChargeControllerCoordinator(
+        hass, mock_config_entry, load_balancer=AdvancedCalculator(_LOGGER)
+    )
     
     # Trigger update
     data = await coordinator._async_update_data()

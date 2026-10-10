@@ -9,7 +9,7 @@ import pytest
 from custom_components.generic_charge_controller.const import DOMAIN
 
 @pytest.fixture
-def hass():
+def mock_hass():
     """Return a mocked Home Assistant instance."""
     hass = MagicMock()
     hass.data = {DOMAIN: {}}
