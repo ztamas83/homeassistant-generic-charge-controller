@@ -1,18 +1,5 @@
 import { HassEntity, HomeAssistant } from "../../types";
-
-export interface ChargerData {
-  id: string;
-  name: string;
-  serialNumber: string;
-  status: string;
-  power: number;
-  currentLimit: number;
-  currentUsage: number;
-  configured: boolean;
-  l1_usage: number;
-  l2_usage: number;
-  l3_usage: number;
-}
+import { ChargerData } from "./charger-data";
 
 /**
  * Get chargers from the 'easee' domain by looking at devices and their entities.
@@ -78,6 +65,9 @@ export const getEaseeChargers = (hass: HomeAssistant): ChargerData[] => {
       power: power,
       currentLimit: currentLimit,
       currentUsage: Math.max(l1, l2, l3), // Total usage as max of phases
+      l1_ref: "circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL1",
+      l2_ref: "circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL2",
+      l3_ref: "circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL3",
       l1_usage: l1,
       l2_usage: l2,
       l3_usage: l3,

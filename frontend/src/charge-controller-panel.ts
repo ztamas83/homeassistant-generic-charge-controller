@@ -230,16 +230,35 @@ export class ChargeControllerPanel extends LitElement {
   }
 
   private async _onHouseholdEnabled(e: CustomEvent<{ deviceId: string }>) {
-    console.log(`Enable household for device: ${e.detail.deviceId}`);
+    const deviceId = e.detail.deviceId;
+    console.log(`Enable household for device: ${deviceId}`);
+
+    // Collect entity IDs for this device
+    const deviceEntities = Object.values(this.hass.entities).filter(
+      (ent: any) => ent.device_id === deviceId
+    ) as any[];
+
+    const config: any = { enabled: true };
+
+    for (const entity of deviceEntities) {
+      if (entity.entity_id.includes("current_l1")) {
+        config.l1_sensor = entity.entity_id;
+      } else if (entity.entity_id.includes("current_l2")) {
+        config.l2_sensor = entity.entity_id;
+      } else if (entity.entity_id.includes("current_l3")) {
+        config.l3_sensor = entity.entity_id;
+      }
+    }
+
     try {
       const household = await this.hass.callWS({
         type: "generic_charge_controller/households/save",
-        device_id: e.detail.deviceId,
-        config: { enabled: true }
+        device_id: deviceId,
+        config: config
       });
       this._configuredHouseholds = {
         ...this._configuredHouseholds,
-        [e.detail.deviceId]: household
+        [deviceId]: household
       };
     } catch (err) {
       console.error("Error saving household:", err);

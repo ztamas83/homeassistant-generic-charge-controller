@@ -1,43 +1,69 @@
-"""Advanced current calculations"""
+"""Simple current calculations with running mean"""
 
+from __future__ import annotations
 import numpy
 from math import trunc
+from typing import Dict
+
+from .abstract_loadbalancer import AbstractLoadBalancer
 
 SAFETY_MARGIN = 1
 
 
-class Calculator:
-    """Target current calculator"""
+class Calculator(AbstractLoadBalancer):
+    """Target current calculator using running mean"""
 
-    def __init__(self, logger, rated_current: float = 0) -> None:
-        self._rated_current = rated_current
+    def __init__(self, logger) -> None:
         self._logger = logger
+        self._samples: Dict[str, list[float]] = {}
 
-    def _running_mean(self, samples, window_size) -> float:
+    def _running_mean(self, samples: list[float], window_size: int) -> float:
         """Running mean calculator"""
-        # https://stackoverflow.com/questions/13728392/moving-average-or-running-mean
-
         valid_window = min(window_size, len(samples))
         if not valid_window:
-            return 0
+            return 0.0
 
-        cumsum = numpy.cumsum(numpy.insert(samples, 0, 0))
-        return (cumsum[valid_window:] - cumsum[:-valid_window]) / float(valid_window)
+        relevant_samples = samples[-valid_window:]
+        return sum(relevant_samples) / float(valid_window)
 
-    def _get_new_current(self, calc_load: float) -> int:
-        return max(0, self._rated_current - trunc(calc_load) - SAFETY_MARGIN)
+    def _get_new_current(self, rated_current: float, calc_load: float) -> float:
+        return float(max(0, rated_current - trunc(calc_load) - SAFETY_MARGIN))
 
-    def calculate_target_current(self, current_load: float) -> int:
-        """Provides the target current as a simple operation"""
+    def calculate_target_current(
+        self, 
+        charger_id: str, 
+        phase_mapping: dict[str, str],
+        current_load_ampere: dict[str, float], 
+        charger_load_ampere: dict[str, float],
+        rated_current_ampere: float
+    ) -> dict[str, float]:
+        """Calculate target current for a given charger using running mean"""
+        
+        # Simple implementation ignoring charger_load for now as per previous version
+        # but matching signature.
+        targets_by_house_phase = {}
+        for phase, load in current_load_ampere.items():
+            key = f"{charger_id}_{phase}"
+            if key not in self._samples:
+                self._samples[key] = []
+            
+            self._samples[key].append(load)
+            if len(self._samples[key]) > 6:
+                self._samples[key].pop(0)
+            
+            mean_load = self._running_mean(self._samples[key], 6)
+            targets_by_house_phase[phase] = self._get_new_current(rated_current_ampere, mean_load)
 
-        return self._get_new_current(current_load)
+        # Apply mapping to charger phases
+        charger_targets = {}
+        mapping_internal = {
+            "L1": phase_mapping.get("house_l1", "cl1"),
+            "L2": phase_mapping.get("house_l2", "cl2"),
+            "L3": phase_mapping.get("house_l3", "cl3"),
+        }
 
-    def calculate_target_with_filter(self, phase_data) -> int:
-        """Provides the target current run through a mean filter"""
+        for house_phase, charger_phase in mapping_internal.items():
+            if house_phase in targets_by_house_phase:
+                charger_targets[charger_phase] = targets_by_house_phase[house_phase]
 
-        running_mean = self._running_mean(
-            phase_data.samples,
-            6,  # windows size 6 => 5x6 seconds, 30 sec
-        )
-
-        return self._get_new_current(running_mean[-1])
+        return charger_targets
