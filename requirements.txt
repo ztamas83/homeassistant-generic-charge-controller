@@ -1,5 +1,6 @@
 pytest
 pytest-asyncio
+pytest-homeassistant-custom-component
 homeassistant
 voluptuous
 numpy

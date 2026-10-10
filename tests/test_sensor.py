@@ -14,17 +14,17 @@ from custom_components.generic_charge_controller.const import DOMAIN
 
 
 @pytest.mark.asyncio
-async def test_async_setup_entry(hass, mock_config_entry, mock_store, mock_coordinator):
+async def test_async_setup_entry(mock_hass, mock_config_entry, mock_store, mock_coordinator):
     """Test sensor setup from config entry."""
-    hass.data[DOMAIN]["store"] = mock_store
-    hass.data[DOMAIN][mock_config_entry.entry_id] = mock_coordinator
+    mock_hass.data[DOMAIN]["store"] = mock_store
+    mock_hass.data[DOMAIN][mock_config_entry.entry_id] = mock_coordinator
 
     # Mock some chargers in the store
     mock_store.get_chargers.return_value = {"charger_1": {"name": "Charger 1"}}
 
     async_add_entities = MagicMock()
 
-    await async_setup_entry(hass, mock_config_entry, async_add_entities)
+    await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
 
     assert async_add_entities.called
     entities = async_add_entities.call_args[0][0]
