@@ -56,5 +56,14 @@ CHARGER_TYPE_EASEE = "easee"
 CHARGER_TYPES = [CHARGER_TYPE_EASEE]
 
 # Charger modes
-MODE_IDLE = "idle"
-MODES = [MODE_IDLE]
+MODE_IDLE = "idle"  # not charging
+MODE_CHARGING = "charging"  # charging, not limited by the household load
+MODE_LIMITED = "limited"  # charging, limited to protect the main fuse
+MODE_FAILSAFE = "failsafe"  # household load unknown, all phases at 0 A
+MODES = [MODE_IDLE, MODE_CHARGING, MODE_LIMITED, MODE_FAILSAFE]
+
+# Load balancing defaults
+MIN_CHARGING_CURRENT_A = 6  # IEC 61851 minimum; below this a phase is paused (0 A)
+DEFAULT_SAFETY_MARGIN_A = 1
+DEFAULT_RAMP_UP_A_PER_MIN = 2
+DEFAULT_STALE_AFTER_S = 120

@@ -3,11 +3,17 @@ import { customElement, property, state } from "lit/decorators.js";
 import { loadHaElements } from "./load-ha-elements";
 import { getEaseeChargerData } from "./utils/charger/easee";
 import { ChargerData } from "./utils/charger/charger-data";
-import { ChargerConfig, DiscoveredCharger, HouseholdConfig } from "./types";
+import {
+  ChargerConfig,
+  ControllerEntities,
+  DiscoveredCharger,
+  HouseholdConfig,
+} from "./types";
 import "./components/cc-charger-card";
 import "./components/cc-load-balancer-settings";
 import "./components/cc-household-card";
 import "./components/cc-household-editor";
+import "./components/cc-charger-history";
 
 type TabId = "households" | "chargers";
 
@@ -27,6 +33,7 @@ export class ChargeControllerPanel extends LitElement {
   @state() private _households: Record<string, HouseholdConfig> = {};
   @state() private _chargerConfigs: Record<string, ChargerConfig> = {};
   @state() private _discoveredChargers: DiscoveredCharger[] = [];
+  @state() private _entities: ControllerEntities = { households: {}, chargers: {} };
   /** Household being edited: an id, "new", or null when not editing. */
   @state() private _editingHousehold: string | null = null;
   @state() private _error = "";
@@ -43,14 +50,16 @@ export class ChargeControllerPanel extends LitElement {
 
   private async _loadData() {
     try {
-      const [households, chargers, discovered] = await Promise.all([
+      const [households, chargers, discovered, entities] = await Promise.all([
         this.hass.callWS({ type: `${WS}/households/get` }),
         this.hass.callWS({ type: `${WS}/chargers/get` }),
         this.hass.callWS({ type: `${WS}/chargers/discover` }),
+        this.hass.callWS({ type: `${WS}/entities` }),
       ]);
       this._households = households;
       this._chargerConfigs = chargers;
       this._discoveredChargers = discovered;
+      this._entities = entities;
     } catch (err: any) {
       this._error = `Error loading data from Charge Controller backend: ${err?.message ?? err}`;
     }
@@ -124,7 +133,19 @@ export class ChargeControllerPanel extends LitElement {
     `;
   }
 
+  /** Numeric state of one of the charger's sensors, null when unknown. */
+  private _chargerValue(chargerId: string, key: string): number | null {
+    const entityId = (this._entities.chargers[chargerId] as Record<string, string>)?.[key];
+    const value = parseFloat(this.hass.states[entityId]?.state);
+    return Number.isFinite(value) ? value : null;
+  }
+
   private _renderChargerCard(charger: ChargerData, selectable: boolean) {
+    const entities = this._entities.chargers[charger.id];
+    const targets = entities
+      ? [1, 2, 3].map((i) => this._chargerValue(charger.id, `target_current_P${i}`))
+      : null;
+    const modeState = entities?.mode ? this.hass.states[entities.mode]?.state : undefined;
     return html`
       <cc-charger-card
         .chargerId=${charger.id}
@@ -138,6 +159,8 @@ export class ChargeControllerPanel extends LitElement {
         .l2Usage=${charger.l2_usage}
         .l3Usage=${charger.l3_usage}
         .configured=${!!this._chargerConfigs[charger.id]}
+        .targets=${targets}
+        .mode=${modeState ?? null}
         @charger-selected=${selectable ? this._onChargerSelected : null}
       ></cc-charger-card>
     `;
@@ -231,10 +254,28 @@ export class ChargeControllerPanel extends LitElement {
           .chargerId=${charger.id}
           .households=${this._households}
           .config=${this._chargerConfigs[charger.id] ?? null}
-          @config-saved=${this._loadData}
+          @config-saved=${this._onChargerConfigSaved}
         ></cc-load-balancer-settings>
+        <cc-charger-history
+          .hass=${this.hass}
+          .targetEntities=${this._targetEntities(charger.id)}
+          .modeEntity=${this._entities.chargers[charger.id]?.mode ?? null}
+        ></cc-charger-history>
       </div>
     `;
+  }
+
+  /** Target current sensors P1-P3 of a charger; empty until all exist. */
+  private _targetEntities(chargerId: string): string[] {
+    const entities = this._entities.chargers[chargerId] ?? {};
+    const ids = [entities.target_current_P1, entities.target_current_P2, entities.target_current_P3];
+    return ids.every((id) => id) ? (ids as string[]) : [];
+  }
+
+  private async _onChargerConfigSaved() {
+    await this._loadData();
+    // The backend reloads the integration after saving; entities exist shortly after
+    setTimeout(() => this._loadData(), 3000);
   }
 
   private _navigate(path: string) {

@@ -1,7 +1,7 @@
 """Tests for the generic_charge_controller sensors, set up through the config entry."""
 
 import pytest
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -10,6 +10,8 @@ from custom_components.generic_charge_controller.const import DOMAIN
 from .conftest import (
     HOUSEHOLD_CONFIG,
     PHASE_MAP,
+    set_easee_states,
+    set_meter_states,
     setup_integration,
     storage_data,
 )
@@ -69,18 +71,34 @@ async def test_household_device(hass, configured):
     assert device.name == "Home"
 
 
-async def test_charger_sensors(hass, configured):
-    """Charger sensors exist; without load balancing the mode is idle and targets unknown."""
+async def test_charger_sensors_failsafe(hass, configured):
+    """An unavailable household phase puts the charger in failsafe with 0 A targets."""
     charger_id = configured.id
     await setup_integration(hass)
 
     for phase in ("p1", "p2", "p3"):
         state = hass.states.get(_entity_id(hass, f"{DOMAIN}_{charger_id}_target_current_{phase}"))
-        assert state.state == STATE_UNKNOWN
+        assert float(state.state) == 0
         assert state.attributes["unit_of_measurement"] == "A"
 
     mode = hass.states.get(_entity_id(hass, f"{DOMAIN}_{charger_id}_mode"))
-    assert mode.state == "idle"
+    assert mode.state == "failsafe"
+    assert mode.attributes["reasons"] == ["No valid household load for L3"]
+
+
+async def test_charger_sensors_charging(hass, configured):
+    """Targets and charger currents are exposed per charger phase."""
+    charger_id = configured.id
+    set_meter_states(hass, 12, 9, 15.2)
+    set_easee_states(hass, currents=(8, 8, 8), status="charging", rated_current=16)
+    await setup_integration(hass)
+
+    def value(key: str) -> float:
+        return float(hass.states.get(_entity_id(hass, f"{DOMAIN}_{charger_id}_{key}")).state)
+
+    assert [value(f"target_current_p{i}") for i in (1, 2, 3)] == [11, 15, 16]
+    assert [value(f"charger_current_p{i}") for i in (1, 2, 3)] == [8, 8, 8]
+    assert hass.states.get(_entity_id(hass, f"{DOMAIN}_{charger_id}_mode")).state == "limited"
 
 
 async def test_charger_device_linked_to_easee(hass, configured):

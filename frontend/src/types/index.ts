@@ -216,3 +216,18 @@ export interface DiscoveredCharger {
   model: string | null;
   entities: Partial<Record<"status" | "power" | "circuit_current" | "max_circuit_limit", string>>;
 }
+
+// Entity ids of the integration's sensors (generic_charge_controller/entities)
+export type ChargerEntityKey =
+  | "target_current_P1"
+  | "target_current_P2"
+  | "target_current_P3"
+  | "charger_current_P1"
+  | "charger_current_P2"
+  | "charger_current_P3"
+  | "mode";
+
+export interface ControllerEntities {
+  households: Record<string, Partial<Record<HouseholdPhase, string>>>;
+  chargers: Record<string, Partial<Record<ChargerEntityKey, string>>>;
+}

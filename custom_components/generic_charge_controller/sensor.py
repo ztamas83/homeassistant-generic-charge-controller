@@ -28,6 +28,7 @@ from .const import (
 )
 from .coordinator import ChargeControllerCoordinator
 from .store import ChargeControllerStore
+from .unique_ids import charger_unique_id, household_load_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class HouseholdLoadSensor(CoordinatorEntity[ChargeControllerCoordinator], Sensor
         super().__init__(coordinator)
         self._household_id = household_id
         self._phase = phase
-        self._attr_unique_id = f"{DOMAIN}_household_{household_id}_load_{phase.lower()}"
+        self._attr_unique_id = household_load_unique_id(household_id, phase)
         self._attr_name = f"Load {phase}"
         self._attr_device_info = household_device_info(household_id, household_name)
 
@@ -114,7 +115,7 @@ class _ChargerSensor(CoordinatorEntity[ChargeControllerCoordinator], SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self._charger_id = charger_id
-        self._attr_unique_id = f"{DOMAIN}_{charger_id}_{self._data_key.lower()}"
+        self._attr_unique_id = charger_unique_id(charger_id, self._data_key)
         self._attr_device_info = device_info
 
     def _charger_data(self) -> dict | None:
@@ -147,8 +148,28 @@ class ChargerTargetCurrentSensor(_ChargerSensor):
         self._attr_name = f"Target current {phase}"
 
 
+class ChargerCurrentSensor(_ChargerSensor):
+    """Current drawn by the charger on one charger phase, as read from the charger."""
+
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_suggested_display_precision = 1
+
+    def __init__(
+        self,
+        coordinator: ChargeControllerCoordinator,
+        charger_id: str,
+        device_info: DeviceInfo,
+        phase: str,
+    ) -> None:
+        self._data_key = f"charger_current_{phase}"
+        super().__init__(coordinator, charger_id, device_info)
+        self._attr_name = f"Charger current {phase}"
+
+
 class ChargerModeSensor(_ChargerSensor):
-    """Load balancing mode of a charger."""
+    """Load balancing mode of a charger, with the reasons behind it."""
 
     _data_key = "mode"
     _attr_device_class = SensorDeviceClass.ENUM
@@ -161,6 +182,11 @@ class ChargerModeSensor(_ChargerSensor):
         if charger is None:
             return MODE_IDLE
         return charger.get(self._data_key, MODE_IDLE)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, list[str]]:
+        charger = self._charger_data()
+        return {"reasons": charger.get("reasons", []) if charger else []}
 
 
 @callback
@@ -208,6 +234,10 @@ async def async_setup_entry(
         device_info = charger_device_info(hass, charger_id)
         entities.extend(
             ChargerTargetCurrentSensor(coordinator, charger_id, device_info, phase)
+            for phase in CHARGER_PHASES
+        )
+        entities.extend(
+            ChargerCurrentSensor(coordinator, charger_id, device_info, phase)
             for phase in CHARGER_PHASES
         )
         entities.append(ChargerModeSensor(coordinator, charger_id, device_info))
