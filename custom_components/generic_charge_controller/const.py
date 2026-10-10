@@ -30,7 +30,31 @@ ATTR_LIMIT_Px = "Current limit %s"
 STORE_KEY_CHARGERS = "chargers"
 STORE_KEY_HOUSEHOLDS = "households"
 STORE_KEY_SETTINGS = "settings"
-STORE_KEY_MEASUREMENT_DATA = "measurement_data"
 
 # Update interval in seconds
 UPDATE_INTERVAL = 45
+
+# Phases: household phases (L1-L3) and charger phases (P1-P3)
+PHASES = ("L1", "L2", "L3")
+CHARGER_PHASES = ("P1", "P2", "P3")
+
+# Household config keys
+HH_ID = "household_id"
+HH_NAME = "name"
+HH_FUSE = "fuse_a"
+HH_PHASE_ENTITIES = {"L1": "l1_entity", "L2": "l2_entity", "L3": "l3_entity"}
+FUSE_MIN_A = 6
+FUSE_MAX_A = 250
+
+# Charger config keys
+CH_ID = "charger_id"
+CH_TYPE = "type"
+CH_HOUSEHOLD = "household_id"
+CH_PHASE_MAP = "phase_map"
+
+CHARGER_TYPE_EASEE = "easee"
+CHARGER_TYPES = [CHARGER_TYPE_EASEE]
+
+# Charger modes
+MODE_IDLE = "idle"
+MODES = [MODE_IDLE]

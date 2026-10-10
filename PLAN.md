@@ -18,7 +18,7 @@ Scope: 1 household, 1 charger (data model allows more).
 
 - Every step ends with `make test` green and a deployable integration (`make deploy`) that can be verified in HA.
 - The charger is never actuated before step 3, and from step 3 only when the "Load balancing active" switch is on.
-- Update the status checkboxes and "Open decisions" in this file as work progresses.
+- Update the status checkboxes, "Decisions" and "Log" in this file as work progresses.
 
 ## Dev environment
 
@@ -53,7 +53,7 @@ Leftovers / unused: `HistoryStore`, `measurement_data`, settings WS (unused by f
 ## Plan
 
 ### Step 1: Unified data model, working config path, no crashes
-Status: [ ] not started
+Status: [x] implemented 2026-10-10, awaiting verification in HA
 
 Changes:
 - Store schema v2 (discard old data):
@@ -115,7 +115,7 @@ Status: [ ] not started
 Changes:
 - Charger detail view: live household load, charger load, targets, mode, switch state; phase mapping editor.
 - Settings tab: safety margin, smoothing speed, stale timeout (stored in `settings`).
-- Statistics card: remove or wire up (see decision 3).
+- Statistics card: remove or wire up (decision 3: use HA recorder).
 
 Verify:
 - `make build` passes.
@@ -146,12 +146,20 @@ Verify:
 - Solar charging
 - Statistics
 
-## Open decisions
+## Decisions
 
-1. Fail-safe target when meter data is missing: pause (0 A) or hold charger minimum (~6 A)? Recommendation: 0 A, the only value that cannot overload the fuse.
-2. Discard old store data in step 1? Recommendation: yes.
-3. `HistoryStore` (CSV history): keep for statistics or delete and rely on HA recorder? Recommendation: delete.
+1. Fail-safe target when meter data is missing: 0 A (pause). Decided 2026-10-10.
+2. Old store data is discarded in step 1 (store v2). Decided 2026-10-10.
+3. `HistoryStore` is deleted (step 6); statistics will use the HA recorder. Decided 2026-10-10.
+
+## Notes for later steps
+
+- Step 1 left in place for step 2: `loadbalancer/*` calculators, `abstract_charger.py`, `easee/charger.py` (not used at runtime yet).
+- Step 6: `manifest.json` should list `http`, `frontend`, `websocket_api` as dependencies; unused imports in `__init__.py` (`json`, `DATA_HASS_CONFIG`, `VERSION`); old `CONF_*` constants and commented config flow in `config_flow.py`.
+- Easee discovery matches entities by unique id `<serial>_<key>`, falling back to the entity id suffix. Confirm against the real Easee integration in HA.
 
 ## Log
 
 - 2026-10-10: Gap analysis done. Test env rebuilt (`.venv`, `pytest-homeassistant-custom-component`, `pytest.ini`); all 9 tests pass. Coordinator test now injects `AdvancedCalculator`; runtime default is still `LoggingCalculator` (fixed in step 2).
+- 2026-10-10: Step 1 implemented. Store v2 (v1 discarded), validated WS API incl. `chargers/discover`, reload on config change, stale entity/device cleanup, household load sensors (A/mA only, unavailable when source untrusted), charger target/mode sensors (idle, unknown targets), household editor and charger settings with `ha-form`. 43 tests pass, `make build` OK.
+- 2026-10-10: Panel JS URL carries a content hash (no stale browser cache after deploy). Households tab first; chargers grouped per household. 44 tests pass.

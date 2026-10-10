@@ -1,65 +1,85 @@
 """Tests for ChargeControllerCoordinator."""
+
 import logging
+
 import pytest
-from custom_components.generic_charge_controller.coordinator import ChargeControllerCoordinator
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 from custom_components.generic_charge_controller.const import DOMAIN
-from custom_components.generic_charge_controller.loadbalancer.advanced_calculator import AdvancedCalculator
+from custom_components.generic_charge_controller.coordinator import ChargeControllerCoordinator
 
-_LOGGER = logging.getLogger(__name__)
+from .conftest import HOUSEHOLD_CONFIG
 
-@pytest.mark.asyncio
-async def test_coordinator_load_balancing(hass, mock_config_entry, mock_store):
-    """Test coordinator load balancing logic with refactored config."""
+
+@pytest.fixture
+def coordinator(hass, mock_store):
+    """Coordinator with one household and one charger in the store."""
     hass.data.setdefault(DOMAIN, {})["store"] = mock_store
-    
-    # Setup mock store data with new structure
-    mock_store.get_chargers.return_value = {
-        "charger_1": {
-            "charger_id": "charger_1",
-            "household_id": "house_1",
-            "rated_current": 16,
-            "L1": "sensor.easee.state.attributes[phase 1]",
-            "L2": "sensor.easee.state.attributes[phase 2]",
-            "L3": "sensor.easee.state.attributes[phase 3]",
-        }
-    }
     mock_store.get_households.return_value = {
-        "house_1": {
-            "device_id": "house_1",
-            "L1": "sensor.house_l1",
-            "L2": "sensor.house_l2",
-            "L3": "sensor.house_l3",
-        }
+        "house_1": {"household_id": "house_1", **HOUSEHOLD_CONFIG}
     }
-    
-    # Setup states
-    hass.states.async_set("sensor.house_l1", "10.0")
-    hass.states.async_set("sensor.house_l2", "5.0")
-    hass.states.async_set("sensor.house_l3", "2.0")
-    hass.states.async_set("sensor.easee", "online", {
-        "phase 1": 8.0,
-        "phase 2": 4.0,
-        "phase 3": 0.0
-    })
+    mock_store.get_chargers.return_value = {"device_1": {"charger_id": "device_1"}}
+    entry = MockConfigEntry(domain=DOMAIN)
+    entry.add_to_hass(hass)
+    return ChargeControllerCoordinator(hass, entry)
 
-    coordinator = ChargeControllerCoordinator(
-        hass, mock_config_entry, load_balancer=AdvancedCalculator(_LOGGER)
-    )
-    
-    # Trigger update
+
+async def test_household_loads(hass, coordinator):
+    """Loads are read per phase in ampere, mA is converted."""
+    hass.states.async_set("sensor.meter_l1", "10.5", {"unit_of_measurement": "A"})
+    hass.states.async_set("sensor.meter_l2", "2500", {"unit_of_measurement": "mA"})
+    hass.states.async_set("sensor.meter_l3", "0", {"unit_of_measurement": "A"})
+
     data = await coordinator._async_update_data()
-    
-    # Verify results
-    assert "chargers" in data
-    charger_data = data["chargers"]["charger_1"]
-    
-    # Expected results (AdvancedCalculator SAFETY_MARGIN = 2):
-    # L1: 16 - (10 - 8) - 2 = 12.0
-    # L2: 16 - (5 - 4) - 2 = 13.0
-    # L3: 16 - (2 - 0) - 2 = 12.0
-    
-    # Internal phase mapping from attributes[phase X] -> PX
-    assert charger_data["target_current_P1"] == 12.0
-    assert charger_data["target_current_P2"] == 13.0
-    assert charger_data["target_current_P3"] == 12.0
-    assert charger_data["mode"] == "balancing"
+
+    assert data["households"]["house_1"] == {"L1": 10.5, "L2": 2.5, "L3": 0.0}
+
+
+@pytest.mark.parametrize(
+    ("state", "attributes"),
+    [
+        ("unavailable", {"unit_of_measurement": "A"}),
+        ("unknown", {"unit_of_measurement": "A"}),
+        ("not a number", {"unit_of_measurement": "A"}),
+        ("nan", {"unit_of_measurement": "A"}),
+        ("2300", {"unit_of_measurement": "W"}),
+        ("10", {}),
+    ],
+)
+async def test_untrusted_values_are_none(hass, coordinator, state, attributes):
+    """Values that cannot be trusted are None, never 0."""
+    hass.states.async_set("sensor.meter_l1", state, attributes)
+
+    data = await coordinator._async_update_data()
+
+    assert data["households"]["house_1"]["L1"] is None
+
+
+async def test_missing_entity_is_none(hass, coordinator):
+    """A configured entity that does not exist reads as None."""
+    data = await coordinator._async_update_data()
+
+    assert data["households"]["house_1"] == {"L1": None, "L2": None, "L3": None}
+
+
+async def test_wrong_unit_warns_once(hass, coordinator, caplog):
+    """A sensor with a non-current unit is reported once."""
+    hass.states.async_set("sensor.meter_l1", "2300", {"unit_of_measurement": "W"})
+
+    with caplog.at_level(logging.WARNING):
+        await coordinator._async_update_data()
+        await coordinator._async_update_data()
+
+    assert caplog.text.count("sensor.meter_l1 has unit W") == 1
+
+
+async def test_chargers_idle_without_targets(hass, coordinator):
+    """Until load balancing exists, chargers are idle without targets."""
+    data = await coordinator._async_update_data()
+
+    assert data["chargers"]["device_1"] == {
+        "mode": "idle",
+        "target_current_P1": None,
+        "target_current_P2": None,
+        "target_current_P3": None,
+    }

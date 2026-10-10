@@ -1,80 +1,38 @@
-import { HassEntity, HomeAssistant } from "../../types";
+import { DiscoveredCharger, HomeAssistant } from "../../types";
 import { ChargerData } from "./charger-data";
 
+const num = (value: unknown): number => {
+  const parsed = parseFloat(value as string);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 /**
- * Get chargers from the 'easee' domain by looking at devices and their entities.
+ * Combine an Easee charger found by the backend with its live entity states.
  */
-export const getEaseeChargers = (hass: HomeAssistant): ChargerData[] => {
-  // 1. Find all entities with platform "easee"
-  const easeeEntities = Object.values(hass.entities).filter(
-    (e) => e.platform === "easee"
-  );
+export const getEaseeChargerData = (
+  hass: HomeAssistant,
+  charger: DiscoveredCharger
+): ChargerData => {
+  const state = (key: keyof DiscoveredCharger["entities"]) => {
+    const entityId = charger.entities[key];
+    return entityId ? hass.states[entityId] : undefined;
+  };
 
-  // 2. Find unique device IDs for these entities
-  const deviceIds = new Set<string>();
-  for (const entity of easeeEntities) {
-    if (entity.device_id) {
-      deviceIds.add(entity.device_id);
-    }
-  }
+  const circuitCurrent = state("circuit_current");
+  const attr = (phase: number) =>
+    num(circuitCurrent?.attributes[`state_circuitTotalPhaseConductorCurrentL${phase}`]);
+  const [l1, l2, l3] = [attr(1), attr(2), attr(3)];
 
-  const chargers: ChargerData[] = [];
-
-  // 3. For each device ID, gather information
-  for (const deviceId of deviceIds) {
-    const device = hass.devices[deviceId];
-    if (!device) continue;
-
-    // Find all entities for this device
-    const deviceEntities = Object.values(hass.entities).filter(
-      (e) => e.device_id === deviceId
-    );
-
-    // Create a map of entity_id to state for easy lookup
-    const stateMap = deviceEntities.reduce((map, e) => {
-      const state = hass.states[e.entity_id];
-      if (state) {
-        map.set(e.entity_id, state);
-      }
-      return map;
-    }, new Map<string, HassEntity>());
-
-    const getSensorEntityId = (suffix: string) => {
-      return `sensor.${device.name?.toLowerCase().replace(/\s+/g, "_")}_${suffix}`;
-    }
-
-    // Find status, power, and circuit current sensors
-    const status = stateMap.get(getSensorEntityId("status"))?.state || "Unknown";
-    const power = parseFloat(stateMap.get(getSensorEntityId("power"))?.state || "0");
-    const currentLimit = parseFloat(stateMap.get(getSensorEntityId("max_circuit_limit"))?.state || "0");
-    
-    const circuitCurrentEntity = stateMap.get(getSensorEntityId("circuit_current"));
-    let l1 = 0, l2 = 0, l3 = 0;
-    
-    if (circuitCurrentEntity) {
-      l1 = parseFloat(circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL1 as any) || 0;
-      l2 = parseFloat(circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL2 as any) || 0;
-      l3 = parseFloat(circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL3 as any) || 0;
-    }
-
-    chargers.push({
-      id: deviceId,
-      name: device.name || "Unknown Charger",
-      serialNumber: device.serial_number || "N/A",
-      status: status,
-      power: power,
-      currentLimit: currentLimit,
-      currentUsage: Math.max(l1, l2, l3), // Total usage as max of phases
-      l1_ref: "circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL1",
-      l2_ref: "circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL2",
-      l3_ref: "circuitCurrentEntity.attributes.state_circuitTotalPhaseConductorCurrentL3",
-      l1_usage: l1,
-      l2_usage: l2,
-      l3_usage: l3,
-      configured: false, // To be implemented later (check store)
-    });
-
-  }
-
-  return chargers;
+  return {
+    id: charger.device_id,
+    name: charger.name,
+    serialNumber: charger.serial,
+    status: state("status")?.state ?? "unknown",
+    power: num(state("power")?.state),
+    currentLimit: num(state("max_circuit_limit")?.state),
+    currentUsage: Math.max(l1, l2, l3),
+    l1_usage: l1,
+    l2_usage: l2,
+    l3_usage: l3,
+  };
 };

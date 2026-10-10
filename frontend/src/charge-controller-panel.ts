@@ -1,12 +1,17 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { loadHaElements } from "./load-ha-elements";
-import { getEaseeChargers } from "./utils/charger/easee";
+import { getEaseeChargerData } from "./utils/charger/easee";
+import { ChargerData } from "./utils/charger/charger-data";
+import { ChargerConfig, DiscoveredCharger, HouseholdConfig } from "./types";
 import "./components/cc-charger-card";
 import "./components/cc-load-balancer-settings";
 import "./components/cc-household-card";
+import "./components/cc-household-editor";
 
-type TabId = "chargers" | "households" | "settings";
+type TabId = "households" | "chargers";
+
+const WS = "generic_charge_controller";
 
 @customElement("charge-controller-panel")
 export class ChargeControllerPanel extends LitElement {
@@ -17,10 +22,14 @@ export class ChargeControllerPanel extends LitElement {
 
   @state() private _elementsLoaded = false;
   @state() private _selectedChargerId: string | null = null;
-  @state() private _activeTab: TabId = "chargers";
+  @state() private _activeTab: TabId = "households";
   @state() private _routeApplied = false;
-  @state() private _configuredHouseholds: Record<string, any> = {};
-  @state() private _configuredChargers: Record<string, any> = {};
+  @state() private _households: Record<string, HouseholdConfig> = {};
+  @state() private _chargerConfigs: Record<string, ChargerConfig> = {};
+  @state() private _discoveredChargers: DiscoveredCharger[] = [];
+  /** Household being edited: an id, "new", or null when not editing. */
+  @state() private _editingHousehold: string | null = null;
+  @state() private _error = "";
 
   protected firstUpdated() {
     this._loadElements();
@@ -34,14 +43,16 @@ export class ChargeControllerPanel extends LitElement {
 
   private async _loadData() {
     try {
-      this._configuredHouseholds = await this.hass.callWS({
-        type: "generic_charge_controller/households/get",
-      });
-      this._configuredChargers = await this.hass.callWS({
-        type: "generic_charge_controller/chargers/get",
-      });
-    } catch (err) {
-      console.error("Error loading data from Charge Controller backend:", err);
+      const [households, chargers, discovered] = await Promise.all([
+        this.hass.callWS({ type: `${WS}/households/get` }),
+        this.hass.callWS({ type: `${WS}/chargers/get` }),
+        this.hass.callWS({ type: `${WS}/chargers/discover` }),
+      ]);
+      this._households = households;
+      this._chargerConfigs = chargers;
+      this._discoveredChargers = discovered;
+    } catch (err: any) {
+      this._error = `Error loading data from Charge Controller backend: ${err?.message ?? err}`;
     }
   }
 
@@ -64,152 +75,164 @@ export class ChargeControllerPanel extends LitElement {
       return html`<div class="loading">Loading...</div>`;
     }
 
+    const chargers = this._discoveredChargers.map((c) => getEaseeChargerData(this.hass, c));
     const inDetail = !!this._selectedChargerId;
-    const chargers = getEaseeChargers(this.hass);
-    const selectedCharger = inDetail 
-      ? chargers.find(c => c.id === this._selectedChargerId)
+    const selectedCharger = inDetail
+      ? chargers.find((c) => c.id === this._selectedChargerId) ?? null
       : null;
 
     return html`
       <div class="toolbar">
-        ${inDetail 
+        ${inDetail
           ? html`
-            <ha-icon-button
-              .label=${"Back"}
-              @click=${this._goBack}
-            >
+            <ha-icon-button .label=${"Back"} @click=${this._goBack}>
               <ha-icon .icon=${"mdi:arrow-left"}></ha-icon>
             </ha-icon-button>`
-      : nothing
-        }
+          : nothing}
         <div class="title">
           ${inDetail ? selectedCharger?.name ?? "Charger Details" : "Charge Controller"}
         </div>
         ${!inDetail
-        ? html`
+          ? html`
             <div class="tabs">
-              <div 
-                class="tab ${this._activeTab === "chargers" ? "active" : ""}" 
-                @click=${() => this._activeTab = "chargers"}
-              >
-                Chargers
-              </div>
-              <div 
-                class="tab ${this._activeTab === "households" ? "active" : ""}" 
-                @click=${() => this._activeTab = "households"}
+              <div
+                class="tab ${this._activeTab === "households" ? "active" : ""}"
+                @click=${() => (this._activeTab = "households")}
               >
                 Households
               </div>
+              <div
+                class="tab ${this._activeTab === "chargers" ? "active" : ""}"
+                @click=${() => (this._activeTab = "chargers")}
+              >
+                Chargers
+              </div>
             </div>
           `
-        : nothing
-        }
+          : nothing}
       </div>
       <div class="content">
-        ${inDetail 
+        ${this._error
+          ? html`<div class="error-banner" @click=${() => (this._error = "")}>${this._error}</div>`
+          : nothing}
+        ${inDetail
           ? this._renderDetail(selectedCharger)
-      : this._activeTab === "chargers"
-        ? this._renderGrid(chargers)
-        : this._renderHouseholds()
-        }
+          : this._activeTab === "households"
+            ? this._renderHouseholds()
+            : this._renderChargers(chargers)}
       </div>
     `;
   }
 
-  private _renderGrid(chargers: any[]) {
+  private _renderChargerCard(charger: ChargerData, selectable: boolean) {
     return html`
-      ${chargers.length === 0
-        ? html`<p>No Easee chargers detected in your system.</p>`
-        : html`
-            <div class="grid">
-              ${chargers.map(charger => {
-                const isConfigured = !!this._configuredChargers[charger.id];
-                return html`
-                <cc-charger-card
-                  .chargerId=${charger.id}
-                  .name=${charger.name}
-                  .serialNumber=${charger.serialNumber}
-                  .status=${charger.status}
-                  .power=${charger.power}
-                  .currentLimit=${charger.currentLimit}
-                  .currentUsage=${charger.currentUsage}
-                  .l1Usage=${charger.l1_usage}
-                  .l2Usage=${charger.l2_usage}
-                  .l3Usage=${charger.l3_usage}
-                  .configured=${isConfigured}
-                  @charger-selected=${this._onChargerSelected}
-                ></cc-charger-card>
-              `;
-              })}
-            </div>
-          `}
+      <cc-charger-card
+        .chargerId=${charger.id}
+        .name=${charger.name}
+        .serialNumber=${charger.serialNumber}
+        .status=${charger.status}
+        .power=${charger.power}
+        .currentLimit=${charger.currentLimit}
+        .currentUsage=${charger.currentUsage}
+        .l1Usage=${charger.l1_usage}
+        .l2Usage=${charger.l2_usage}
+        .l3Usage=${charger.l3_usage}
+        .configured=${!!this._chargerConfigs[charger.id]}
+        @charger-selected=${selectable ? this._onChargerSelected : null}
+      ></cc-charger-card>
+    `;
+  }
+
+  private _renderChargers(chargers: ChargerData[]) {
+    if (chargers.length === 0) {
+      return html`<p>No Easee chargers detected in your system.</p>`;
+    }
+
+    const householdOf = (c: ChargerData) => this._chargerConfigs[c.id]?.household_id;
+    const unassigned = chargers.filter((c) => {
+      const householdId = householdOf(c);
+      return !householdId || !this._households[householdId];
+    });
+
+    return html`
+      ${Object.values(this._households).map((h) =>
+        this._renderChargerGroup(
+          h.name,
+          chargers.filter((c) => householdOf(c) === h.household_id),
+          "No chargers assigned to this household."
+        )
+      )}
+      ${unassigned.length > 0 ? this._renderChargerGroup("Not configured", unassigned, "") : nothing}
+    `;
+  }
+
+  private _renderChargerGroup(title: string, chargers: ChargerData[], emptyText: string) {
+    return html`
+      <section class="group">
+        <h2 class="group-header">${title}</h2>
+        ${chargers.length === 0
+          ? html`<p class="group-empty">${emptyText}</p>`
+          : html`<div class="grid">${chargers.map((c) => this._renderChargerCard(c, true))}</div>`}
+      </section>
     `;
   }
 
   private _renderHouseholds() {
-    // Detect "Tibber pulse" devices
-    const tibberPulseDevices = Object.values(this.hass.devices).filter(
-      (device: any) => device.model === "Tibber Pulse"
-    );
+    if (this._editingHousehold !== null) {
+      const household =
+        this._editingHousehold === "new" ? null : this._households[this._editingHousehold];
+      return html`
+        <div class="detail-view">
+          <cc-household-editor
+            .hass=${this.hass}
+            .household=${household}
+            @household-saved=${this._onHouseholdSaved}
+            @editor-closed=${() => (this._editingHousehold = null)}
+          ></cc-household-editor>
+        </div>
+      `;
+    }
 
+    const households = Object.values(this._households);
     return html`
-      ${tibberPulseDevices.length === 0
-        ? html`<p>No Tibber Pulse devices detected in your system.</p>`
+      <div class="actions">
+        <ha-button @click=${() => (this._editingHousehold = "new")}>Add household</ha-button>
+      </div>
+      ${households.length === 0
+        ? html`<p>No households configured yet.</p>`
         : html`
             <div class="grid">
-              ${tibberPulseDevices.map((device: any) => {
-          const name = device.name.replace(/Tibber Pulse/gi, "").trim() || device.name;
-          const isConfigured = !!this._configuredHouseholds[device.id];
-          return html`
+              ${households.map(
+                (h) => html`
                   <cc-household-card
-                    .deviceId=${device.id}
-                    .name=${name}
-                    .enabled=${isConfigured}
-                    @household-enabled=${this._onHouseholdEnabled}
-                    @household-removed=${this._onHouseholdRemoved}
+                    .hass=${this.hass}
+                    .household=${h}
+                    @household-edit=${(e: CustomEvent) =>
+                      (this._editingHousehold = e.detail.householdId)}
+                    @household-delete=${this._onHouseholdDelete}
                   ></cc-household-card>
-                `;
-        })}
+                `
+              )}
             </div>
           `}
     `;
   }
 
-  private _renderDetail(charger: any | null) {
+  private _renderDetail(charger: ChargerData | null) {
     if (!charger) {
       return html`<p>Charger not found.</p>`;
     }
 
-    const isConfigured = !!this._configuredChargers[charger.id];
-
     return html`
       <div class="detail-view">
-        <cc-charger-card
-          .chargerId=${charger.id}
-          .name=${charger.name}
-          .serialNumber=${charger.serialNumber}
-          .status=${charger.status}
-          .power=${charger.power}
-          .currentLimit=${charger.currentLimit}
-          .currentUsage=${charger.currentUsage}
-          .l1Usage=${charger.l1_usage}
-          .l2Usage=${charger.l2_usage}
-          .l3Usage=${charger.l3_usage}
-          .configured=${isConfigured}
-        ></cc-charger-card>
-
+        ${this._renderChargerCard(charger, false)}
         <cc-load-balancer-settings
           .hass=${this.hass}
           .chargerId=${charger.id}
-          .households=${this._configuredHouseholds}
+          .households=${this._households}
+          .config=${this._chargerConfigs[charger.id] ?? null}
           @config-saved=${this._loadData}
         ></cc-load-balancer-settings>
-
-        <ha-card header="Statistics">
-          <div class="card-content">
-            <p>Placeholder for charging statistics and history.</p>
-          </div>
-        </ha-card>
       </div>
     `;
   }
@@ -229,54 +252,24 @@ export class ChargeControllerPanel extends LitElement {
     this._navigate(`/charger/${e.detail.chargerId}`);
   }
 
-  private async _onHouseholdEnabled(e: CustomEvent<{ deviceId: string }>) {
-    const deviceId = e.detail.deviceId;
-    console.log(`Enable household for device: ${deviceId}`);
-
-    // Collect entity IDs for this device
-    const deviceEntities = Object.values(this.hass.entities).filter(
-      (ent: any) => ent.device_id === deviceId
-    ) as any[];
-
-    const config: any = { enabled: true };
-
-    for (const entity of deviceEntities) {
-      if (entity.entity_id.includes("current_l1")) {
-        config.l1_sensor = entity.entity_id;
-      } else if (entity.entity_id.includes("current_l2")) {
-        config.l2_sensor = entity.entity_id;
-      } else if (entity.entity_id.includes("current_l3")) {
-        config.l3_sensor = entity.entity_id;
-      }
-    }
-
-    try {
-      const household = await this.hass.callWS({
-        type: "generic_charge_controller/households/save",
-        device_id: deviceId,
-        config: config
-      });
-      this._configuredHouseholds = {
-        ...this._configuredHouseholds,
-        [deviceId]: household
-      };
-    } catch (err) {
-      console.error("Error saving household:", err);
-    }
+  private async _onHouseholdSaved() {
+    this._editingHousehold = null;
+    await this._loadData();
   }
 
-  private async _onHouseholdRemoved(e: CustomEvent<{ deviceId: string }>) {
-    console.log(`Household removed for device: ${e.detail.deviceId}`);
+  private async _onHouseholdDelete(e: CustomEvent<{ householdId: string }>) {
+    const household = this._households[e.detail.householdId];
+    if (!household || !confirm(`Delete household "${household.name}"?`)) {
+      return;
+    }
     try {
       await this.hass.callWS({
-        type: "generic_charge_controller/households/delete",
-        device_id: e.detail.deviceId,
+        type: `${WS}/households/delete`,
+        household_id: household.household_id,
       });
-      const newHouseholds = { ...this._configuredHouseholds };
-      delete newHouseholds[e.detail.deviceId];
-      this._configuredHouseholds = newHouseholds;
-    } catch (err) {
-      console.error("Error deleting household:", err);
+      await this._loadData();
+    } catch (err: any) {
+      this._error = err?.message ?? String(err);
     }
   }
 
@@ -353,6 +346,37 @@ export class ChargeControllerPanel extends LitElement {
       gap: 16px;
       max-width: 600px;
       margin: 0 auto;
+    }
+
+    .group + .group {
+      margin-top: 32px;
+    }
+
+    .group-header {
+      margin: 0 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--divider-color);
+      font-size: 18px;
+      font-weight: 500;
+    }
+
+    .group-empty {
+      color: var(--secondary-text-color);
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 16px;
+    }
+
+    .error-banner {
+      background-color: var(--error-color);
+      color: var(--text-primary-color, #fff);
+      padding: 8px 16px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      cursor: pointer;
     }
 
     .loading {

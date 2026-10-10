@@ -51,7 +51,7 @@ class ChargeControllerFlowConfig(config_entries.ConfigFlow, domain=DOMAIN):
             # Prevent multiple instances
             await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
-            return self.async_create_entry(title="RoomMind", data={})
+            return self.async_create_entry(title="Charge Controller", data={})
 
         return self.async_show_form(step_id="user")
 

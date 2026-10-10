@@ -3,6 +3,12 @@
  * These are loaded at runtime via load-ha-elements.ts, not from npm.
  */
 
+export interface HaFormSchema {
+  name: string;
+  required?: boolean;
+  selector: Record<string, unknown>;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     "ha-card": HTMLElement & { header?: string };
@@ -30,6 +36,13 @@ declare global {
       includeDeviceClasses?: string[];
       entityFilter?: (entity: any) => boolean;
       hideClearIcon?: boolean;
+      disabled?: boolean;
+    };
+    "ha-form": HTMLElement & {
+      hass?: any;
+      data?: Record<string, unknown>;
+      schema?: HaFormSchema[];
+      computeLabel?: (schema: HaFormSchema) => string;
       disabled?: boolean;
     };
     "ha-chart-base": HTMLElement & {
