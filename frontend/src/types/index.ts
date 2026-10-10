@@ -187,3 +187,32 @@ export interface AnalyticsData {
 }
 
 export type TimeRange = "12h" | "24h" | "2d" | "7d" | "14d" | "30d" | "90d";
+
+// Charge controller configuration, as stored by the backend
+export type HouseholdPhase = "L1" | "L2" | "L3";
+export type ChargerPhase = "P1" | "P2" | "P3";
+
+export interface HouseholdConfig {
+  household_id: string;
+  name: string;
+  fuse_a: number;
+  l1_entity: string;
+  l2_entity: string;
+  l3_entity: string;
+}
+
+export interface ChargerConfig {
+  charger_id: string;
+  type: "easee";
+  household_id: string;
+  phase_map: Record<HouseholdPhase, ChargerPhase>;
+}
+
+// Charger found in HA by the backend (generic_charge_controller/chargers/discover)
+export interface DiscoveredCharger {
+  device_id: string;
+  name: string;
+  serial: string;
+  model: string | null;
+  entities: Partial<Record<"status" | "power" | "circuit_current" | "max_circuit_limit", string>>;
+}

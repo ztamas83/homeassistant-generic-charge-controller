@@ -1,189 +1,165 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { HomeAssistant } from "../types";
+import {
+  ChargerConfig,
+  ChargerPhase,
+  HomeAssistant,
+  HouseholdConfig,
+  HouseholdPhase,
+} from "../types";
+import type { HaFormSchema } from "../types/ha-elements";
+
+const HOUSEHOLD_PHASES: HouseholdPhase[] = ["L1", "L2", "L3"];
+const CHARGER_PHASE_OPTIONS = [
+  { value: "P1", label: "Charger phase 1" },
+  { value: "P2", label: "Charger phase 2" },
+  { value: "P3", label: "Charger phase 3" },
+];
+
+interface SettingsForm {
+  household_id?: string;
+  L1: ChargerPhase;
+  L2: ChargerPhase;
+  L3: ChargerPhase;
+}
 
 @customElement("cc-load-balancer-settings")
 export class CcLoadBalancerSettings extends LitElement {
   @property({ attribute: false }) public hass!: HomeAssistant;
   @property() public chargerId = "";
-  @property({ attribute: false }) public households: Record<string, any> = {};
+  @property({ attribute: false }) public households: Record<string, HouseholdConfig> = {};
+  /** Stored configuration of this charger, if any. */
+  @property({ attribute: false }) public config: ChargerConfig | null = null;
 
-  @state() private _selectedHouseholdId = "";
-  @state() private _house_l1 = "cl1";
-  @state() private _house_l2 = "cl2";
-  @state() private _house_l3 = "cl3";
+  @state() private _data: SettingsForm = { L1: "P1", L2: "P2", L3: "P3" };
+  @state() private _error = "";
+  @state() private _saving = false;
 
-  protected firstUpdated() {
-    this._loadConfig();
-  }
-
-  private async _loadConfig() {
-    try {
-      const chargers = await this.hass.callWS<Record<string, any>>({
-        type: "generic_charge_controller/chargers/get",
-      });
-      const config = chargers[this.chargerId];
-      if (config) {
-        this._selectedHouseholdId = config.household_id || "";
-        this._house_l1 = config.house_l1 || "cl1";
-        this._house_l2 = config.house_l2 || "cl2";
-        this._house_l3 = config.house_l3 || "cl3";
-      }
-    } catch (err) {
-      console.error("Error loading charger config:", err);
+  protected willUpdate(changed: Map<string, unknown>) {
+    if (changed.has("config") && this.config) {
+      this._data = { household_id: this.config.household_id, ...this.config.phase_map };
     }
   }
 
+  private get _schema(): HaFormSchema[] {
+    return [
+      {
+        name: "household_id",
+        required: true,
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: Object.values(this.households).map((h) => ({
+              value: h.household_id,
+              label: h.name,
+            })),
+          },
+        },
+      },
+      ...HOUSEHOLD_PHASES.map((p) => ({
+        name: p,
+        required: true,
+        selector: { select: { mode: "dropdown", options: CHARGER_PHASE_OPTIONS } },
+      })),
+    ];
+  }
+
+  private get _phaseMapValid(): boolean {
+    return new Set(HOUSEHOLD_PHASES.map((p) => this._data[p])).size === 3;
+  }
+
   protected render() {
-    const enabledHouseholds = Object.values(this.households);
-    
-    if (enabledHouseholds.length === 0) {
+    if (Object.keys(this.households).length === 0) {
       return html`
-        <ha-card header="Load Balancing Configuration">
+        <ha-card header="Load balancing configuration">
           <div class="card-content">
             <p class="warning-text">
-              No households are currently enabled. At least one household must be enabled in the "Households" tab before you can configure load balancing for this charger.
+              No households are configured. Add a household in the "Households" tab before
+              configuring load balancing for this charger.
             </p>
           </div>
         </ha-card>
       `;
     }
 
+    const valid = !!this._data.household_id && this._phaseMapValid;
+
     return html`
-      <ha-card header="Load Balancing Configuration">
+      <ha-card header="Load balancing configuration">
         <div class="card-content">
           <p class="description">
-            Select the household this charger should be connected to for load balancing.
+            Select the household this charger is connected to, and which charger phase each
+            household phase is wired to.
           </p>
-          
-          <div class="settings-row">
-            <span class="label">Connected Household</span>
-            <select 
-              .value=${this._selectedHouseholdId}
-              @change=${(e: any) => this._selectedHouseholdId = e.target.value}
-            >
-              <option value="">Select a household...</option>
-              ${enabledHouseholds.map(h => {
-                const device = this.hass.devices[h.device_id];
-                const name = device ? device.name.replace(/Tibber Pulse/gi, "").trim() || device.name : h.device_id;
-                return html`<option value=${h.device_id} ?selected=${this._selectedHouseholdId === h.device_id}>${name}</option>`;
-              })}
-            </select>
-          </div>
-
-          ${this._selectedHouseholdId ? html`
-            <div class="phase-mapping">
-              <p class="description">
-                Map your home's phases to the phases on the charger.
-              </p>
-              
-              ${[1, 2, 3].map(i => {
-                const val = (this as any)[`_house_l${i}`];
-                return html`
-                  <div class="settings-row phase-row">
-                    <span class="label">Home L${i}:</span>
-                    <select 
-                      .value=${val}
-                      @change=${(e: any) => (this as any)[`_house_l${i}`] = e.target.value}
-                    >
-                      <option value="cl1" ?selected=${val === "cl1"}>Charger L1</option>
-                      <option value="cl2" ?selected=${val === "cl2"}>Charger L2</option>
-                      <option value="cl3" ?selected=${val === "cl3"}>Charger L3</option>
-                    </select>
-                  </div>
-                `;
-              })}
-            </div>
-          ` : nothing}
+          <ha-form
+            .hass=${this.hass}
+            .data=${this._data}
+            .schema=${this._schema}
+            .computeLabel=${(s: HaFormSchema) =>
+              s.name === "household_id" ? "Household" : `Household ${s.name}`}
+            @value-changed=${(e: CustomEvent) => (this._data = e.detail.value)}
+          ></ha-form>
+          ${this._phaseMapValid
+            ? nothing
+            : html`<p class="error">Each charger phase can only be selected once.</p>`}
+          ${this._error ? html`<p class="error">${this._error}</p>` : nothing}
         </div>
         <div class="card-actions">
-           <ha-button 
-             .disabled=${!this._selectedHouseholdId}
-             @click=${this._save}
-           >
-             Save Configuration
-           </ha-button>
+          ${this.config
+            ? html`<ha-button variant="danger" appearance="plain" @click=${this._remove}>
+                Remove configuration
+              </ha-button>`
+            : nothing}
+          <ha-button .disabled=${!valid || this._saving} @click=${this._save}>Save</ha-button>
         </div>
       </ha-card>
     `;
   }
 
-  private async _save() {
+  private async _call(msg: Record<string, unknown>) {
+    this._saving = true;
+    this._error = "";
     try {
-      await this.hass.callWS({
-        type: "generic_charge_controller/chargers/save",
-        charger_id: this.chargerId,
-        config: {
-          household_id: this._selectedHouseholdId,
-          house_l1: this._house_l1,
-          house_l2: this._house_l2,
-          house_l3: this._house_l3,
-        }
-      });
-      
-      this.dispatchEvent(new CustomEvent("config-saved", {
-        bubbles: true,
-        composed: true
-      }));
-    } catch (err) {
-      console.error("Error saving charger config:", err);
+      await this.hass.callWS(msg);
+      this.dispatchEvent(new CustomEvent("config-saved", { bubbles: true, composed: true }));
+    } catch (err: any) {
+      this._error = err?.message ?? String(err);
+    } finally {
+      this._saving = false;
     }
+  }
+
+  private _save() {
+    const { household_id, L1, L2, L3 } = this._data;
+    return this._call({
+      type: "generic_charge_controller/chargers/save",
+      charger_id: this.chargerId,
+      config: { type: "easee", household_id, phase_map: { L1, L2, L3 } },
+    });
+  }
+
+  private _remove() {
+    return this._call({
+      type: "generic_charge_controller/chargers/delete",
+      charger_id: this.chargerId,
+    });
   }
 
   static styles = css`
     .description {
       color: var(--secondary-text-color);
-      margin-bottom: 16px;
+      margin-top: 0;
     }
 
-    .warning-text {
+    .warning-text,
+    .error {
       color: var(--error-color);
-      font-weight: 500;
-    }
-
-    .settings-row {
-      display: flex;
-      flex-direction: column;
-      margin-bottom: 16px;
-    }
-
-    .phase-row {
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-
-    .phase-row .label {
-      margin-bottom: 0;
-      white-space: nowrap;
-      min-width: 80px;
-    }
-
-    .label {
-      font-weight: 500;
-      margin-bottom: 8px;
-    }
-
-    select {
-      width: 100%;
-      padding: 8px;
-      border-radius: 4px;
-      border: 1px solid var(--divider-color);
-      background-color: var(--card-background-color);
-      color: var(--primary-text-color);
-      font-size: 16px;
-    }
-
-    .phase-mapping {
-      margin-top: 24px;
-      padding-top: 16px;
-      border-top: 1px dashed var(--divider-color);
     }
 
     .card-actions {
       display: flex;
       justify-content: flex-end;
+      gap: 8px;
       padding: 8px;
       border-top: 1px solid var(--divider-color);
     }

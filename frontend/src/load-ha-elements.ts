@@ -5,7 +5,7 @@
  * Technique used by alarmo, scheduler-card, mushroom, and others.
  */
 export const loadHaElements = async (): Promise<void> => {
-  if (customElements.get("ha-entity-picker")) return;
+  if (customElements.get("ha-entity-picker") && customElements.get("ha-form")) return;
 
   // Step 1: Load base HA components via partial-panel-resolver.
   // Guard on ha-selector (not ha-card) because ha-card can be defined by
@@ -74,6 +74,12 @@ export const loadHaElements = async (): Promise<void> => {
   }
 
   await customElements.whenDefined("ha-card");
+
+  // ha-form is used for all configuration forms; it is loaded with the config panel.
+  await Promise.race([
+    customElements.whenDefined("ha-form"),
+    new Promise<void>((r) => setTimeout(r, 10_000)),
+  ]);
 
   // Step 3: Load ha-date-range-picker (used by rs-analytics).
   if (!customElements.get("ha-date-range-picker")) {

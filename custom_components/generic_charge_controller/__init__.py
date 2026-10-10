@@ -1,5 +1,6 @@
 """Generic Charge Controller"""
 
+import hashlib
 import logging
 import json
 from pathlib import Path
@@ -28,6 +29,7 @@ from homeassistant.components.frontend import (
 )
 
 PLATFORMS = [Platform.SENSOR]
+PANEL_URL_PATH = "charge-controller"
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,18 +40,24 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data.setdefault(DOMAIN, {})
     _LOGGER.info("Setting up generic_charge_controller component")
 
+    await _async_ensure_store(hass)
     async_register_websocket_commands(hass)
     return True
+
+
+async def _async_ensure_store(hass: HomeAssistant) -> ChargeControllerStore:
+    """Create and load the store once."""
+    if "store" not in hass.data[DOMAIN]:
+        store = ChargeControllerStore(hass)
+        await store.async_load()
+        hass.data[DOMAIN]["store"] = store
+    return hass.data[DOMAIN]["store"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a config entry."""
     _LOGGER.info("Setting up generic_charge_controller entry: %s", entry.entry_id)
 
-    # Ensure store is initialized even if async_setup was somehow skipped or called differently
-    if "store" not in hass.data[DOMAIN]:
-        store = ChargeControllerStore(hass)
-        await store.async_load()
-        hass.data[DOMAIN]["store"] = store
+    await _async_ensure_store(hass)
 
     # Coordinator
     coordinator = ChargeControllerCoordinator(hass, entry)
@@ -59,10 +67,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][
         "coordinator"
     ] = coordinator  # For easy access in websocket handlers
-
-    if not hass.data[DOMAIN].get("websocket_registered"):
-        async_register_websocket_commands(hass)
-        hass.data[DOMAIN]["websocket_registered"] = True
 
     await _async_register_panel(hass)
     _LOGGER.info(
@@ -88,11 +92,17 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         hass.data[DOMAIN].pop(config_entry.entry_id)
         hass.data[DOMAIN].pop("coordinator", None)
 
-    # Remove panel if no entries remain
-    if not hass.data[DOMAIN]:
-        async_remove_panel(hass, "roommind")
-
+    # The panel stays registered across reloads; it is removed with the entry
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> None:
+    """Remove panel and stored configuration when the entry is deleted."""
+    if hass.data[DOMAIN].pop("panel_registered", False):
+        async_remove_panel(hass, PANEL_URL_PATH)
+
+    store = await _async_ensure_store(hass)
+    await store.async_remove()
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -116,19 +126,24 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     except RuntimeError:
         _LOGGER.debug("Charge Controller static path already registered")
 
+    # Content hash in the URL so browsers load the new bundle after an update
+    js_hash = await hass.async_add_executor_job(
+        lambda: hashlib.sha256(panel_js.read_bytes()).hexdigest()[:12]
+    )
+
     try:
         async_register_built_in_panel(
             hass,
             component_name="custom",
             sidebar_title="Charge Controller",
             sidebar_icon="mdi:ev-station",
-            frontend_url_path="charge-controller",
+            frontend_url_path=PANEL_URL_PATH,
             config={
                 "_panel_custom": {
                     "name": "charge-controller-panel",
                     "embed_iframe": False,
                     "trust_external": False,
-                    "js_url": "/charge-controller/controller-panel.js",
+                    "js_url": f"/charge-controller/controller-panel.js?v={js_hash}",
                 }
             },
         )

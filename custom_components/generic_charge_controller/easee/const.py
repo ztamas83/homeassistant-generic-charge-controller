@@ -33,6 +33,8 @@ CHRG_DOMAIN = "easee"
 S_NAME_CIRCUITCURRENT = "circuit_current"
 S_NAME_ONLINE = "online"
 S_NAME_STATUS = "status"
+S_NAME_POWER = "power"
+S_NAME_MAX_CIRCUIT_LIMIT = "max_circuit_limit"
 ATTR_PHASE_CURRENT_TMP = "state_circuitTotalPhaseConductorCurrentL%s"
 
 
