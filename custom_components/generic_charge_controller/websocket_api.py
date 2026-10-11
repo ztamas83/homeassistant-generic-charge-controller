@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 ERR_HOUSEHOLD_IN_USE = "household_in_use"
+ERR_RELEASE_FAILED = "release_failed"
 
 
 def _unique_charger_phases(value: dict) -> dict:
@@ -177,8 +179,21 @@ async def websocket_delete_charger(
     connection: ActiveConnection,
     msg: dict,
 ) -> None:
-    """Delete a charger configuration."""
-    await _get_store(hass).async_delete_charger(msg["charger_id"])
+    """Delete a charger configuration, releasing its limits if they are controlled."""
+    charger_id = msg["charger_id"]
+    coordinator = hass.data[DOMAIN].get("coordinator")
+    if coordinator is not None and coordinator.is_active(charger_id):
+        try:
+            await coordinator.async_set_active(charger_id, False)
+        except HomeAssistantError as err:
+            connection.send_error(
+                msg["id"],
+                ERR_RELEASE_FAILED,
+                f"Could not remove the limits from the charger: {err}",
+            )
+            return
+
+    await _get_store(hass).async_delete_charger(charger_id)
     _async_reload_entries(hass)
     connection.send_result(msg["id"], {"success": True})
 

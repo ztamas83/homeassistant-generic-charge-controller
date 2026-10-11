@@ -6,7 +6,7 @@ import abc
 
 
 class AbstractCharger(abc.ABC):
-    """Read access to a charger. Phases are the charger's own phases P1-P3."""
+    """Access to a charger. Phases are the charger's own phases P1-P3."""
 
     @abc.abstractmethod
     def phase_currents(self) -> dict[str, float | None]:
@@ -17,5 +17,20 @@ class AbstractCharger(abc.ABC):
         """True while the charger delivers current to the car."""
 
     @abc.abstractmethod
+    def is_connected(self) -> bool:
+        """True while a car is connected, whether charging or not."""
+
+    @abc.abstractmethod
     def max_current(self) -> float | None:
         """Highest current per phase the charger may be set to, None if unknown."""
+
+    @abc.abstractmethod
+    async def async_set_limits(self, limits: dict[str, int]) -> None:
+        """Limit the current per charger phase (whole ampere, 0 pauses).
+
+        Raises HomeAssistantError when the limits could not be sent.
+        """
+
+    @abc.abstractmethod
+    async def async_release(self) -> None:
+        """Remove the limits set by async_set_limits."""

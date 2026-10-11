@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -10,11 +11,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform, UnitOfElectricCurrent
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.const import UnitOfElectricCurrent
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -27,43 +26,11 @@ from .const import (
     PHASES,
 )
 from .coordinator import ChargeControllerCoordinator
+from .devices import charger_device_info, household_device_info
 from .store import ChargeControllerStore
 from .unique_ids import charger_unique_id, household_load_unique_id
 
 _LOGGER = logging.getLogger(__name__)
-
-MANUFACTURER = "Generic Charge Controller"
-
-
-def household_device_info(household_id: str, name: str) -> DeviceInfo:
-    """Device representing a household."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, f"household_{household_id}")},
-        name=name,
-        manufacturer=MANUFACTURER,
-        model="Household",
-        entry_type=DeviceEntryType.SERVICE,
-    )
-
-
-def charger_device_info(hass: HomeAssistant, charger_id: str) -> DeviceInfo:
-    """Device representing load balancing for a charger, linked to the charger device."""
-    charger_device = dr.async_get(hass).async_get(charger_id)
-    name = "Charger"
-    if charger_device is not None:
-        name = charger_device.name_by_user or charger_device.name or name
-
-    info = DeviceInfo(
-        identifiers={(DOMAIN, f"charger_{charger_id}")},
-        name=f"{name} load balancing",
-        manufacturer=MANUFACTURER,
-        model="Charger load balancing",
-        entry_type=DeviceEntryType.SERVICE,
-    )
-    if charger_device is not None:
-        info["via_device_id"] = charger_device.id
-    return info
-
 
 class HouseholdLoadSensor(CoordinatorEntity[ChargeControllerCoordinator], SensorEntity):
     """Measured load on one household phase, as read from the configured sensor."""
@@ -184,34 +151,14 @@ class ChargerModeSensor(_ChargerSensor):
         return charger.get(self._data_key, MODE_IDLE)
 
     @property
-    def extra_state_attributes(self) -> dict[str, list[str]]:
-        charger = self._charger_data()
-        return {"reasons": charger.get("reasons", []) if charger else []}
-
-
-@callback
-def _async_remove_stale(
-    hass: HomeAssistant, entry: ConfigEntry, entities: list[SensorEntity]
-) -> None:
-    """Remove entities and devices of removed households and chargers."""
-    unique_ids = {entity.unique_id for entity in entities}
-    device_identifiers = {
-        identifier
-        for entity in entities
-        for identifier in entity.device_info["identifiers"]
-    }
-
-    ent_reg = er.async_get(hass)
-    for reg_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        if reg_entry.domain == Platform.SENSOR and reg_entry.unique_id not in unique_ids:
-            _LOGGER.debug("Removing stale entity %s", reg_entry.entity_id)
-            ent_reg.async_remove(reg_entry.entity_id)
-
-    dev_reg = dr.async_get(hass)
-    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
-        if not device.identifiers & device_identifiers:
-            _LOGGER.debug("Removing stale device %s", device.name)
-            dev_reg.async_remove_device(device.id)
+    def extra_state_attributes(self) -> dict[str, Any]:
+        charger = self._charger_data() or {}
+        return {
+            "reasons": charger.get("reasons", []),
+            "control_active": charger.get("control_active", False),
+            "last_sent": charger.get("last_sent"),
+            "last_sent_at": charger.get("last_sent_at"),
+        }
 
 
 async def async_setup_entry(
@@ -242,7 +189,6 @@ async def async_setup_entry(
         )
         entities.append(ChargerModeSensor(coordinator, charger_id, device_info))
 
-    _async_remove_stale(hass, entry, entities)
     async_add_entities(entities)
 
     _LOGGER.info(

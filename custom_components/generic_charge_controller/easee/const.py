@@ -45,6 +45,10 @@ EA_CHARGING = "charging"
 EA_COMPLETED = "completed"
 EA_ERROR = "error"
 EA_READY_TO_CHARGE = "ready_to_charge"
+EA_OFFLINE = "offline"
+
+# Status values (plus unavailable/unknown) in which no car is connected
+NOT_CONNECTED_STATES = {EA_DISCONNECTED, EA_OFFLINE, "unavailable", "unknown"}
 
 EASEE_STATUS = {
     1: EA_DISCONNECTED,

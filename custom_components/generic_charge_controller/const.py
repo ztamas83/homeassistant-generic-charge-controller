@@ -67,3 +67,8 @@ MIN_CHARGING_CURRENT_A = 6  # IEC 61851 minimum; below this a phase is paused (0
 DEFAULT_SAFETY_MARGIN_A = 1
 DEFAULT_RAMP_UP_A_PER_MIN = 2
 DEFAULT_STALE_AFTER_S = 120
+
+# Sending limits to chargers
+CONTROL_MIN_INCREASE_INTERVAL_S = 60  # decreases are always sent at once
+CONTROL_RECONCILE_INTERVAL_S = 300  # resend unchanged limits to correct drift
+CONTROL_STARTUP_GRACE_S = 120  # hold the last limit while meters come up after start
