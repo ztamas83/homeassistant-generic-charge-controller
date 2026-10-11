@@ -1,19 +1,38 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { HomeAssistant } from "../types";
+import { ControllerSettings, HomeAssistant } from "../types";
 import type { HaFormSchema } from "../types/ha-elements";
 
-interface Settings {
-  charger_update_interval_s: number;
-}
+type Settings = ControllerSettings;
+
+const number = (name: string, min: number, max: number, unit: string): HaFormSchema => ({
+  name,
+  required: true,
+  selector: { number: { min, max, step: 1, mode: "slider", unit_of_measurement: unit } },
+});
 
 const SCHEMA: HaFormSchema[] = [
-  {
-    name: "charger_update_interval_s",
-    required: true,
-    selector: { number: { min: 30, max: 60, step: 1, mode: "slider", unit_of_measurement: "s" } },
-  },
+  number("charger_update_interval_s", 30, 60, "s"),
+  number("safety_margin_a", 0, 5, "A"),
+  number("ramp_up_a_per_min", 1, 10, "A/min"),
+  number("stale_after_s", 60, 600, "s"),
 ];
+
+const LABELS: Record<string, string> = {
+  charger_update_interval_s: "Charger update interval",
+  safety_margin_a: "Safety margin below the fuse rating",
+  ramp_up_a_per_min: "Ramp-up speed after a load drops",
+  stale_after_s: "Treat a meter as failed after no report for",
+};
+
+const HELPERS: Record<string, string> = {
+  charger_update_interval_s:
+    "New limits are sent to the charger at most this often. A household phase above 150% of the fuse for more than 10 s is sent at once.",
+  safety_margin_a: "Current kept free on every phase.",
+  ramp_up_a_per_min: "Lower targets apply at once; higher targets rise at most this fast.",
+  stale_after_s:
+    "A meter sensor that has not reported for this long counts as unknown, which pauses charging (failsafe).",
+};
 
 @customElement("cc-settings")
 export class CcSettings extends LitElement {
@@ -46,16 +65,15 @@ export class CcSettings extends LitElement {
       <ha-card header="Load balancing">
         <div class="card-content">
           <p class="description">
-            Limits are recalculated whenever a meter or charger value changes. New limits are sent
-            to the charger at most once per update interval. A household phase above 150% of the
-            fuse rating for more than 10 seconds is sent at once.
+            Limits are recalculated whenever a meter or charger value changes.
           </p>
           ${this._data
             ? html`<ha-form
                 .hass=${this.hass}
                 .data=${this._data}
                 .schema=${SCHEMA}
-                .computeLabel=${() => "Charger update interval"}
+                .computeLabel=${(s: HaFormSchema) => LABELS[s.name] ?? s.name}
+                .computeHelper=${(s: HaFormSchema) => HELPERS[s.name] ?? ""}
                 @value-changed=${(e: CustomEvent) => (this._data = e.detail.value)}
               ></ha-form>`
             : nothing}

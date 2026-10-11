@@ -34,11 +34,41 @@ export class CcLoadBalancerSettings extends LitElement {
   @state() private _data: SettingsForm = { L1: "P1", L2: "P2", L3: "P3" };
   @state() private _error = "";
   @state() private _saving = false;
+  /** Collapsed when the charger is configured, expanded when it still needs configuring. */
+  @state() private _expanded: boolean | null = null;
 
   protected willUpdate(changed: Map<string, unknown>) {
     if (changed.has("config") && this.config) {
       this._data = { household_id: this.config.household_id, ...this.config.phase_map };
     }
+    if (this._expanded === null) {
+      this._expanded = !this.config;
+    }
+  }
+
+  private _summary() {
+    if (!this.config) {
+      return "Not configured";
+    }
+    const household = this.households[this.config.household_id]?.name ?? "Unknown household";
+    const mapping = HOUSEHOLD_PHASES.map((p) => `${p}→${this.config!.phase_map[p]}`).join(", ");
+    return `${household} · ${mapping}`;
+  }
+
+  private _renderHeader() {
+    return html`
+      <button
+        class="header"
+        aria-expanded=${this._expanded ? "true" : "false"}
+        @click=${() => (this._expanded = !this._expanded)}
+      >
+        <span class="header-text">
+          <span class="title">Load balancing configuration</span>
+          ${this._expanded ? nothing : html`<span class="summary">${this._summary()}</span>`}
+        </span>
+        <span class="chevron ${this._expanded ? "open" : ""}" aria-hidden="true">▾</span>
+      </button>
+    `;
   }
 
   private get _schema(): HaFormSchema[] {
@@ -84,8 +114,13 @@ export class CcLoadBalancerSettings extends LitElement {
 
     const valid = !!this._data.household_id && this._phaseMapValid;
 
+    if (!this._expanded) {
+      return html`<ha-card>${this._renderHeader()}</ha-card>`;
+    }
+
     return html`
-      <ha-card header="Load balancing configuration">
+      <ha-card>
+        ${this._renderHeader()}
         <div class="card-content">
           <p class="description">
             Select the household this charger is connected to, and which charger phase each
@@ -116,26 +151,31 @@ export class CcLoadBalancerSettings extends LitElement {
     `;
   }
 
-  private async _call(msg: Record<string, unknown>) {
+  private async _call(msg: Record<string, unknown>): Promise<boolean> {
     this._saving = true;
     this._error = "";
     try {
       await this.hass.callWS(msg);
       this.dispatchEvent(new CustomEvent("config-saved", { bubbles: true, composed: true }));
+      return true;
     } catch (err: any) {
       this._error = err?.message ?? String(err);
+      return false;
     } finally {
       this._saving = false;
     }
   }
 
-  private _save() {
+  private async _save() {
     const { household_id, L1, L2, L3 } = this._data;
-    return this._call({
+    const saved = await this._call({
       type: "generic_charge_controller/chargers/save",
       charger_id: this.chargerId,
       config: { type: "easee", household_id, phase_map: { L1, L2, L3 } },
     });
+    if (saved) {
+      this._expanded = false;
+    }
   }
 
   private _remove() {
@@ -146,6 +186,48 @@ export class CcLoadBalancerSettings extends LitElement {
   }
 
   static styles = css`
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      width: 100%;
+      padding: 16px;
+      border: none;
+      background: none;
+      color: var(--primary-text-color);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .header-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .title {
+      font-size: var(--ha-card-header-font-size, 20px);
+    }
+
+    .summary {
+      color: var(--secondary-text-color);
+      font-size: 14px;
+    }
+
+    .chevron {
+      color: var(--secondary-text-color);
+      font-size: 20px;
+      transition: transform 0.2s;
+      transform: rotate(-90deg);
+    }
+
+    .chevron.open {
+      transform: none;
+    }
+
     .description {
       color: var(--secondary-text-color);
       margin-top: 0;

@@ -215,6 +215,8 @@ export interface DiscoveredCharger {
   serial: string;
   model: string | null;
   entities: Partial<Record<"status" | "power" | "circuit_current" | "max_circuit_limit", string>>;
+  /** Entities that exist but are disabled in HA. */
+  disabled_entities: string[];
 }
 
 // Entity ids of the integration's sensors (generic_charge_controller/entities)
@@ -225,9 +227,17 @@ export type ChargerEntityKey =
   | "charger_current_P1"
   | "charger_current_P2"
   | "charger_current_P3"
-  | "mode";
+  | "mode"
+  | "control_switch";
 
 export interface ControllerEntities {
   households: Record<string, Partial<Record<HouseholdPhase, string>>>;
   chargers: Record<string, Partial<Record<ChargerEntityKey, string>>>;
+}
+
+export interface ControllerSettings {
+  charger_update_interval_s: number;
+  safety_margin_a: number;
+  ramp_up_a_per_min: number;
+  stale_after_s: number;
 }

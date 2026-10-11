@@ -53,11 +53,17 @@ def async_discover_easee_chargers(hass: HomeAssistant) -> list[dict]:
             continue
 
         entities: dict[str, str] = {}
-        for entry in er.async_entries_for_device(ent_reg, device.id):
+        disabled: set[str] = set()
+        for entry in er.async_entries_for_device(
+            ent_reg, device.id, include_disabled_entities=True
+        ):
             if entry.platform != CHRG_DOMAIN:
                 continue
             if key := _entity_key(entry, serial):
-                entities.setdefault(key, entry.entity_id)
+                if entry.disabled_by is not None:
+                    disabled.add(key)
+                else:
+                    entities.setdefault(key, entry.entity_id)
 
         # Devices without a status sensor are not chargers (e.g. Equalizer)
         if S_NAME_STATUS not in entities:
@@ -69,6 +75,8 @@ def async_discover_easee_chargers(hass: HomeAssistant) -> list[dict]:
             "serial": serial,
             "model": device.model,
             "entities": entities,
+            # Entities that exist but are disabled in HA, e.g. circuit_current by default
+            "disabled_entities": sorted(disabled - entities.keys()),
         })
 
     return sorted(chargers, key=lambda c: c["name"])

@@ -19,6 +19,8 @@ export class CcChargerCard extends LitElement {
   @property({ attribute: false }) public targets: (number | null)[] | null = null;
   /** Load balancing mode (idle, charging, limited, failsafe); null when unknown. */
   @property() public mode: string | null = null;
+  /** Whether limits are sent to the charger; null when unknown. */
+  @property({ attribute: false }) public controlActive: boolean | null = null;
 
   private _formatTarget(value: number | null) {
     return value === null ? "–" : value.toFixed(0);
@@ -65,6 +67,10 @@ export class CcChargerCard extends LitElement {
               <div class="row">
                 <span class="label">Load balancing:</span>
                 <span class="value mode ${this.mode ?? ""}">${this.mode ?? "unknown"}</span>
+              </div>
+              <div class="row">
+                <span class="label">Sending limits:</span>
+                <span class="value">${this.controlActive === null ? "–" : this.controlActive ? "On" : "Off"}</span>
               </div>`
             : ""}
           <div class="row">

@@ -3,6 +3,7 @@
 # Usage:
 #   make build             - Build the frontend
 #   make deploy            - Deploy to Home Assistant via SSH
+#   make restart-ha        - Check the configuration and restart Home Assistant Core via SSH
 #   make clean             - Remove temporary files
 #
 # Configuration (loaded from .env if present):
@@ -28,7 +29,7 @@ ifdef SSH_KEY
 endif
 SSH_CMD = ssh $(SSH_OPTS)
 
-.PHONY: all build deploy clean test help
+.PHONY: all build deploy restart-ha clean test help
 
 all: help
 
@@ -36,6 +37,7 @@ help:
 	@echo "Available targets:"
 	@echo "  build             - Build the frontend (requires npm)"
 	@echo "  deploy            - Deploy to Home Assistant via SSH"
+	@echo "  restart-ha        - Check the configuration and restart Home Assistant Core via SSH"
 	@echo "  clean             - Remove temporary files (local __pycache__)"
 	@echo "  test              - Run tests with pytest"
 	@echo "  help              - Show this help message"
@@ -57,7 +59,14 @@ deploy: build
 	@echo ""
 	@echo "==> Done! Next steps:"
 	@echo "    - Python changes:        Settings -> Integrations -> Charge Controller -> ⋮ -> Reload"
-	@echo "    - WS schema / manifest:  Full HA restart (Settings -> System -> Restart)"
+	@echo "    - WS schema / manifest:  Full HA restart: make restart-ha"
+
+restart-ha:
+	@echo "==> Checking configuration on $(SSH_USER)@$(HA_IP):$(SSH_PORT)"
+	@$(SSH_CMD) "$(SSH_USER)@$(HA_IP)" "ha core check"
+	@echo "==> Restarting Home Assistant Core"
+	@$(SSH_CMD) "$(SSH_USER)@$(HA_IP)" "ha core restart"
+	@echo "    OK"
 
 clean:
 	@echo "==> Cleaning local __pycache__ files"
