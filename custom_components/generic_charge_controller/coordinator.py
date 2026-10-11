@@ -24,9 +24,6 @@ from .const import (
     CH_HOUSEHOLD,
     CH_PHASE_MAP,
     CHARGER_PHASES,
-    DEFAULT_RAMP_UP_A_PER_MIN,
-    DEFAULT_SAFETY_MARGIN_A,
-    DEFAULT_STALE_AFTER_S,
     DOMAIN,
     HH_FUSE,
     HH_PHASE_ENTITIES,
@@ -40,6 +37,9 @@ from .const import (
     PHASES,
     REFRESH_COOLDOWN_S,
     SETTING_CHARGER_UPDATE_INTERVAL,
+    SETTING_RAMP_UP,
+    SETTING_SAFETY_MARGIN,
+    SETTING_STALE_AFTER,
     UPDATE_INTERVAL,
 )
 from .control import LimitSender, OverloadDetector
@@ -69,7 +69,9 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
             ),
         )
         self.entry = entry
-        self.stale_after = timedelta(seconds=DEFAULT_STALE_AFTER_S)
+        # Settings are read once; saving settings reloads the integration
+        self._settings = hass.data[DOMAIN]["store"].get_settings()
+        self.stale_after = timedelta(seconds=self._settings[SETTING_STALE_AFTER])
         self._balancers: dict[str, SafeLoadBalancer] = {}
         self._started_at = dt_util.utcnow()
         self._active: dict[str, bool] = {}
@@ -79,8 +81,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self._recheck_at: datetime | None = None
 
     def _charger_update_interval(self) -> timedelta:
-        settings = self.hass.data[DOMAIN]["store"].get_settings()
-        return timedelta(seconds=settings[SETTING_CHARGER_UPDATE_INTERVAL])
+        return timedelta(seconds=self._settings[SETTING_CHARGER_UPDATE_INTERVAL])
 
     @callback
     def _schedule_recheck(self, delay_s: float, now: datetime) -> None:
@@ -162,9 +163,9 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         """Return the balancer of a charger; it keeps state between updates."""
         config = BalancerConfig(
             fuse_a=fuse_a,
-            safety_margin_a=DEFAULT_SAFETY_MARGIN_A,
+            safety_margin_a=self._settings[SETTING_SAFETY_MARGIN],
             min_current_a=MIN_CHARGING_CURRENT_A,
-            ramp_up_a_per_min=DEFAULT_RAMP_UP_A_PER_MIN,
+            ramp_up_a_per_min=self._settings[SETTING_RAMP_UP],
         )
         balancer = self._balancers.get(charger_id)
         if balancer is None or balancer.config != config:

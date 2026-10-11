@@ -6,6 +6,7 @@ import { ChargerData } from "./utils/charger/charger-data";
 import {
   ChargerConfig,
   ControllerEntities,
+  ControllerSettings,
   DiscoveredCharger,
   HouseholdConfig,
 } from "./types";
@@ -15,6 +16,7 @@ import "./components/cc-household-card";
 import "./components/cc-household-editor";
 import "./components/cc-charger-history";
 import "./components/cc-settings";
+import "./components/cc-charger-status";
 
 type TabId = "households" | "chargers" | "settings";
 
@@ -35,6 +37,7 @@ export class ChargeControllerPanel extends LitElement {
   @state() private _chargerConfigs: Record<string, ChargerConfig> = {};
   @state() private _discoveredChargers: DiscoveredCharger[] = [];
   @state() private _entities: ControllerEntities = { households: {}, chargers: {} };
+  @state() private _settings: ControllerSettings | null = null;
   /** Household being edited: an id, "new", or null when not editing. */
   @state() private _editingHousehold: string | null = null;
   @state() private _error = "";
@@ -51,12 +54,14 @@ export class ChargeControllerPanel extends LitElement {
 
   private async _loadData() {
     try {
-      const [households, chargers, discovered, entities] = await Promise.all([
+      const [households, chargers, discovered, entities, settings] = await Promise.all([
         this.hass.callWS({ type: `${WS}/households/get` }),
         this.hass.callWS({ type: `${WS}/chargers/get` }),
         this.hass.callWS({ type: `${WS}/chargers/discover` }),
         this.hass.callWS({ type: `${WS}/entities` }),
+        this.hass.callWS({ type: `${WS}/settings/get` }),
       ]);
+      this._settings = settings;
       this._households = households;
       this._chargerConfigs = chargers;
       this._discoveredChargers = discovered;
@@ -155,6 +160,9 @@ export class ChargeControllerPanel extends LitElement {
       ? [1, 2, 3].map((i) => this._chargerValue(charger.id, `target_current_P${i}`))
       : null;
     const modeState = entities?.mode ? this.hass.states[entities.mode]?.state : undefined;
+    const controlActive = entities?.control_switch
+      ? this.hass.states[entities.control_switch]?.state === "on"
+      : null;
     return html`
       <cc-charger-card
         .chargerId=${charger.id}
@@ -170,6 +178,7 @@ export class ChargeControllerPanel extends LitElement {
         .configured=${!!this._chargerConfigs[charger.id]}
         .targets=${targets}
         .mode=${modeState ?? null}
+        .controlActive=${controlActive}
         @charger-selected=${selectable ? this._onChargerSelected : null}
       ></cc-charger-card>
     `;
@@ -258,6 +267,19 @@ export class ChargeControllerPanel extends LitElement {
     return html`
       <div class="detail-view">
         ${this._renderChargerCard(charger, false)}
+        ${this._chargerConfigs[charger.id]
+          ? html`<cc-charger-status
+              .hass=${this.hass}
+              .config=${this._chargerConfigs[charger.id]}
+              .household=${this._households[this._chargerConfigs[charger.id].household_id] ?? null}
+              .chargerEntities=${this._entities.chargers[charger.id] ?? {}}
+              .householdEntities=${this._entities.households[
+                this._chargerConfigs[charger.id].household_id
+              ] ?? {}}
+              .discovered=${this._discoveredChargers.find((d) => d.device_id === charger.id) ?? null}
+              .settings=${this._settings}
+            ></cc-charger-status>`
+          : nothing}
         <cc-load-balancer-settings
           .hass=${this.hass}
           .chargerId=${charger.id}

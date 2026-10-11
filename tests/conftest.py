@@ -9,7 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.generic_charge_controller.const import DOMAIN
+from custom_components.generic_charge_controller.const import DEFAULT_SETTINGS, DOMAIN
 
 @pytest.fixture
 def mock_hass():
@@ -34,7 +34,7 @@ def mock_store():
     store.async_load = AsyncMock()
     store.get_chargers = MagicMock(return_value={})
     store.get_households = MagicMock(return_value={})
-    store.get_settings = MagicMock(return_value={"update_interval_s": 30})
+    store.get_settings = MagicMock(return_value=dict(DEFAULT_SETTINGS))
     store.async_save_charger = AsyncMock()
     store.async_save_household = AsyncMock()
     store.async_save_settings = AsyncMock()

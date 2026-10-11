@@ -27,12 +27,15 @@ from .const import (
     HH_NAME,
     HH_PHASE_ENTITIES,
     PHASES,
-    CHARGER_UPDATE_INTERVAL_MAX_S,
-    CHARGER_UPDATE_INTERVAL_MIN_S,
-    SETTING_CHARGER_UPDATE_INTERVAL,
+    SETTINGS_RANGES,
 )
 from .easee.discovery import async_discover_easee_chargers
-from .unique_ids import CHARGER_DATA_KEYS, charger_unique_id, household_load_unique_id
+from .unique_ids import (
+    CHARGER_DATA_KEYS,
+    CONTROL_SWITCH_KEY,
+    charger_unique_id,
+    household_load_unique_id,
+)
 
 if TYPE_CHECKING:
     from homeassistant.components.websocket_api import ActiveConnection
@@ -78,10 +81,8 @@ CHARGER_CONFIG_SCHEMA = vol.Schema(
 
 SETTINGS_SCHEMA = vol.Schema(
     {
-        vol.Optional(SETTING_CHARGER_UPDATE_INTERVAL): vol.All(
-            vol.Coerce(int),
-            vol.Range(min=CHARGER_UPDATE_INTERVAL_MIN_S, max=CHARGER_UPDATE_INTERVAL_MAX_S),
-        ),
+        vol.Optional(key): vol.All(vol.Coerce(int), vol.Range(min=minimum, max=maximum))
+        for key, (_, minimum, maximum) in SETTINGS_RANGES.items()
     }
 )
 
@@ -339,15 +340,15 @@ def websocket_get_entities(
     """Return entity ids of the sensors per household and charger.
 
     Values are keyed like the coordinator data (e.g. "target_current_P1", "mode",
-    "L1"). Sensors that are not registered are left out.
+    "L1"), plus "control_switch" per charger. Unregistered entities are left out.
     """
     store = _get_store(hass)
     ent_reg = er.async_get(hass)
 
-    def lookup(keys_to_unique_ids: dict[str, str]) -> dict[str, str]:
+    def lookup(keys_to_unique_ids: dict[str, str], domain: str = "sensor") -> dict[str, str]:
         result = {}
         for key, unique_id in keys_to_unique_ids.items():
-            if entity_id := ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
+            if entity_id := ent_reg.async_get_entity_id(domain, DOMAIN, unique_id):
                 result[key] = entity_id
         return result
 
@@ -361,9 +362,13 @@ def websocket_get_entities(
                 for household_id in store.get_households()
             },
             "chargers": {
-                charger_id: lookup(
-                    {k: charger_unique_id(charger_id, k) for k in CHARGER_DATA_KEYS}
-                )
+                charger_id: {
+                    **lookup({k: charger_unique_id(charger_id, k) for k in CHARGER_DATA_KEYS}),
+                    **lookup(
+                        {"control_switch": charger_unique_id(charger_id, CONTROL_SWITCH_KEY)},
+                        domain="switch",
+                    ),
+                }
                 for charger_id in store.get_chargers()
             },
         },

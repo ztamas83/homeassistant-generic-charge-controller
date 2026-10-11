@@ -43,6 +43,7 @@ declare global {
       data?: Record<string, unknown>;
       schema?: HaFormSchema[];
       computeLabel?: (schema: HaFormSchema) => string;
+      computeHelper?: (schema: HaFormSchema) => string;
       disabled?: boolean;
     };
     "ha-chart-base": HTMLElement & {

@@ -31,11 +31,18 @@ STORE_KEY_CHARGERS = "chargers"
 STORE_KEY_HOUSEHOLDS = "households"
 STORE_KEY_SETTINGS = "settings"
 
-# Settings (stored in the store's settings, edited in the panel)
+# Settings (stored in the store's settings, edited in the panel): key -> (default, min, max)
 SETTING_CHARGER_UPDATE_INTERVAL = "charger_update_interval_s"  # min time between sends
-CHARGER_UPDATE_INTERVAL_MIN_S = 30
-CHARGER_UPDATE_INTERVAL_MAX_S = 60
-DEFAULT_SETTINGS = {SETTING_CHARGER_UPDATE_INTERVAL: 30}
+SETTING_SAFETY_MARGIN = "safety_margin_a"  # kept free below the fuse rating
+SETTING_RAMP_UP = "ramp_up_a_per_min"  # how fast higher targets are reached
+SETTING_STALE_AFTER = "stale_after_s"  # sensor without report this long counts as unknown
+SETTINGS_RANGES = {
+    SETTING_CHARGER_UPDATE_INTERVAL: (30, 30, 60),
+    SETTING_SAFETY_MARGIN: (1, 0, 5),
+    SETTING_RAMP_UP: (2, 1, 10),
+    SETTING_STALE_AFTER: (120, 60, 600),
+}
+DEFAULT_SETTINGS = {key: default for key, (default, _, _) in SETTINGS_RANGES.items()}
 
 # Calculation runs on every change of an input sensor, at most once per cooldown.
 # The periodic update is a watchdog that also detects sensors that stopped reporting.
@@ -70,11 +77,8 @@ MODE_LIMITED = "limited"  # charging, limited to protect the main fuse
 MODE_FAILSAFE = "failsafe"  # household load unknown, all phases at 0 A
 MODES = [MODE_IDLE, MODE_CHARGING, MODE_LIMITED, MODE_FAILSAFE]
 
-# Load balancing defaults
+# Load balancing
 MIN_CHARGING_CURRENT_A = 6  # IEC 61851 minimum; below this a phase is paused (0 A)
-DEFAULT_SAFETY_MARGIN_A = 1
-DEFAULT_RAMP_UP_A_PER_MIN = 2
-DEFAULT_STALE_AFTER_S = 120
 
 # Sending limits to chargers
 CONTROL_RECONCILE_INTERVAL_S = 300  # resend unchanged limits to correct drift
