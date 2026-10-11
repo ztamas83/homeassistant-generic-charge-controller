@@ -27,6 +27,9 @@ from .const import (
     HH_NAME,
     HH_PHASE_ENTITIES,
     PHASES,
+    CHARGER_UPDATE_INTERVAL_MAX_S,
+    CHARGER_UPDATE_INTERVAL_MIN_S,
+    SETTING_CHARGER_UPDATE_INTERVAL,
 )
 from .easee.discovery import async_discover_easee_chargers
 from .unique_ids import CHARGER_DATA_KEYS, charger_unique_id, household_load_unique_id
@@ -68,6 +71,16 @@ CHARGER_CONFIG_SCHEMA = vol.Schema(
         vol.Required(CH_PHASE_MAP): vol.All(
             vol.Schema({vol.Required(p): vol.In(CHARGER_PHASES) for p in PHASES}),
             _unique_charger_phases,
+        ),
+    }
+)
+
+
+SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SETTING_CHARGER_UPDATE_INTERVAL): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=CHARGER_UPDATE_INTERVAL_MIN_S, max=CHARGER_UPDATE_INTERVAL_MAX_S),
         ),
     }
 )
@@ -297,7 +310,7 @@ def websocket_get_settings(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/settings/save",
-        vol.Required("changes"): dict,
+        vol.Required("changes"): SETTINGS_SCHEMA,
     }
 )
 @websocket_api.async_response
@@ -306,8 +319,9 @@ async def websocket_save_settings(
     connection: ActiveConnection,
     msg: dict,
 ) -> None:
-    """Save global settings."""
+    """Save global settings and reload so they take effect."""
     settings = await _get_store(hass).async_save_settings(msg["changes"])
+    _async_reload_entries(hass)
     connection.send_result(msg["id"], settings)
 
 

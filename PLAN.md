@@ -99,7 +99,7 @@ Verify:
 - HA: switch on while charging -> Easee dynamic circuit limit follows targets; switch off -> no further calls (logbook/debug log).
 
 ### Step 4: Faster reaction
-Status: [ ] not started
+Status: [x] implemented 2026-10-11, awaiting verification in HA
 
 Changes:
 - Recalculate on phase sensor state change, debounced (~2-5 s); keep periodic refresh as watchdog (also detects stale sensors).
@@ -157,7 +157,8 @@ Verify:
 - Step 5: Easee `circuit_current` (phase currents) is disabled by default in the Easee integration; without it the balancer assumes 0 A charger current (safe, but targets drop while charging). Show a hint in the panel.
 - Step 5: show and toggle the "Load balancing active" switch in the panel; show last sent limits.
 - Limits are sent with `time_to_live: 0` (no expiry): the Easee integration skips the API call when the charger already has the requested limits, so a TTL could not be refreshed. Consequence: if HA stops, the charger keeps the last limit. Turning the switch off, or deleting the charger config while active, sets the limit back to the circuit rated current. Removing the whole integration while active does not (unload cannot tell removal from reload); release first.
-- After a car connects, the next update (up to 45 s, step 4 makes it faster) sends the limits; until then the charger uses the last sent limit.
+- After a car connects, the status change triggers a calculation; limits are sent at once if nothing was sent in the last charger update interval, otherwise when it has passed.
+- Since step 4 the household load sensors update with every triggered refresh (up to every 3 s), so the recorder stores them about as often as the meter sensors. Exclude them in `recorder:` if database size matters.
 - Step 6: `make deploy` extracts over the remote folder and never deletes removed files (e.g. old `loadbalancer/calculator.py` stays on HA). Switch to a clean copy.
 - Step 6: `manifest.json` should list `http`, `frontend`, `websocket_api` as dependencies; unused imports in `__init__.py` (`json`, `DATA_HASS_CONFIG`, `VERSION`); old `CONF_*` constants and commented config flow in `config_flow.py`.
 - Easee discovery matches entities by unique id `<serial>_<key>`, confirmed in Easee v0.9.74 (`entity.py`: `f"{product.id}_{entity_name}"`).
@@ -171,3 +172,5 @@ Verify:
 - 2026-10-10: Step 2 implemented. `SafeLoadBalancer` (fail-safe 0 A on unknown/stale household load, unknown charger current assumed 0 A, load rounded up, immediate decrease, 2 A/min ramp-up, whole-ampere targets capped at circuit rated current, below 6 A -> 0). Read-only Easee adapter by unique id, charger factory, shared `readings.read_current_a` with staleness via `last_reported`. Sensors: target and charger current per charger phase, mode (idle/charging/limited/failsafe) with `reasons` attribute. Old calculators and numpy removed. 73 tests pass.
 - 2026-10-10: Panel: charger cards show target currents P1-P3 and load balancing mode; charger detail shows history of targets and mode (own SVG step chart from `history/history_during_period`, 6 h to 7 d, tooltip, table view; HA history-graph card is not usable because `window.loadCardHelpers` is undefined in a custom panel). New WS `entities` returns sensor entity ids per household/charger. 74 tests pass.
 - 2026-10-11: Step 3 implemented. Switch "Load balancing active" per charger (off by default, restored on restart). Limits sent via `easee.set_circuit_dynamic_limit` (`current_p1..3`, TTL 0) only while active and a car is connected; decreases at once, increases at most every 60 s, unchanged limits resent every 5 min, fail-safe held for 120 s after start while meters come up. Switch off and charger delete release to circuit rated current. Mode sensor attributes: `control_active`, `last_sent`, `last_sent_at`. Stale entity cleanup moved to entry setup and covers all platforms. 94 tests pass.
+- 2026-10-11: Step 4 implemented. State changes of household phase sensors and the charger's status and circuit current entities trigger a refresh through the coordinator debouncer (first change at once, then at most one refresh per 3 s); the 45 s periodic update remains as watchdog and stale detection. 98 tests pass.
+- 2026-10-11: Step 4 revised on request: fuses tolerate overload for 1-2 minutes, so sending to the charger is limited to once per "charger update interval" (setting, 30-60 s, default 30, Settings tab in the panel). Calculation stays event-driven. Exception: a household phase above 150 % of the fuse for more than 10 s sends lower limits at once. A scheduled recheck sends held-back limits when the interval has passed and confirms a pending overload after 10 s, even without sensor changes. Watchdog update every 30 s. The old rules (decreases at once, increases every 60 s) are replaced. Mode sensor attribute `overload`. 110 tests pass.

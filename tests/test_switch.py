@@ -99,18 +99,6 @@ async def test_no_car_connected(hass, calls):
     assert "No car connected, limits not sent" in hass.states.get(MODE).attributes["reasons"]
 
 
-async def test_spike_is_sent_on_next_update(hass, calls):
-    await setup_integration(hass)
-    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
-
-    # Household L1 (charger P2) jumps by 6 A of other load
-    set_meter_states(hass, 18, 9, 15.2)
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=46))
-    await hass.async_block_till_done()
-
-    assert limits_sent(calls[-1]) == (11, 9, 16)
-
-
 async def test_switch_state_restored(hass, calls):
     mock_restore_cache(hass, [State(SWITCH, STATE_ON)])
 
@@ -145,3 +133,124 @@ async def test_deleting_active_charger_releases_limits(hass, calls, hass_ws_clie
 
     assert result["success"]
     assert limits_sent(calls[-1]) == (16, 16, 16)
+
+
+async def _active_and_settled(hass) -> None:
+    """Turn the switch on and let the refresh cooldown pass."""
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=5))
+    await hass.async_block_till_done()
+
+
+async def test_meter_change_recalculates_at_once(hass, calls):
+    """Targets follow a meter change at once; sending waits for the update interval."""
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+
+    set_meter_states(hass, 18, 9, 15.2)
+    await hass.async_block_till_done()
+
+    target_p2 = "sensor.garage_charger_load_balancing_target_current_p2"
+    assert float(hass.states.get(target_p2).state) == 9
+    assert len(calls) == 1
+    assert any(
+        r.startswith("New limits are sent in") for r in hass.states.get(MODE).attributes["reasons"]
+    )
+
+
+async def test_held_back_limits_sent_after_interval(hass, calls, freezer):
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+    set_meter_states(hass, 18, 9, 15.2)
+    await hass.async_block_till_done()
+    assert len(calls) == 1
+
+    # The scheduled recheck sends the new limits once the interval has passed
+    freezer.tick(timedelta(seconds=31))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert limits_sent(calls[-1]) == (11, 9, 16)
+
+
+async def test_sustained_overload_bypasses_interval(hass, calls, freezer):
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+
+    # Household L1 (charger P2) at 31 A: above 150 % of the 20 A fuse
+    set_meter_states(hass, 31, 9, 15.2)
+    await hass.async_block_till_done()
+    assert len(calls) == 1  # not yet sustained for 10 s
+
+    freezer.tick(timedelta(seconds=11))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert limits_sent(calls[-1]) == (11, 0, 16)
+    assert hass.states.get(MODE).attributes["overload"] is True
+
+
+async def test_short_overload_waits_for_interval(hass, calls, freezer):
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+
+    set_meter_states(hass, 31, 9, 15.2)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=5))
+    set_meter_states(hass, 25, 9, 15.2)  # back below 30 A within 10 s
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=7))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+
+
+async def test_charger_status_change_triggers_update(hass, calls):
+    set_easee_states(hass, currents=(8, 8, 8), status="disconnected", rated_current=16)
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+    assert calls == []
+
+    set_easee_states(hass, currents=(8, 8, 8), status="charging", rated_current=16)
+    await hass.async_block_till_done()
+
+    assert limits_sent(calls[-1]) == (11, 15, 16)
+
+
+async def test_burst_of_changes_is_debounced(hass, calls):
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+
+    coordinator = hass.data[DOMAIN]["coordinator"]
+    update = coordinator._async_update_data
+    count = 0
+
+    async def counting_update():
+        nonlocal count
+        count += 1
+        return await update()
+
+    coordinator._async_update_data = counting_update
+
+    for value in (12.1, 12.2, 12.3, 12.4, 12.5):
+        hass.states.async_set("sensor.meter_l1", str(value), {"unit_of_measurement": "A"})
+        await hass.async_block_till_done()
+    assert count == 1  # first change at once, the rest wait for the cooldown
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=4))
+    await hass.async_block_till_done()
+    assert count == 2  # one update for all changes during the cooldown
+
+
+async def test_untracked_entity_does_not_trigger_update(hass, calls):
+    await setup_integration(hass)
+    await _active_and_settled(hass)
+    coordinator = hass.data[DOMAIN]["coordinator"]
+    data_before = coordinator.data
+
+    hass.states.async_set("sensor.unrelated", "1")
+    await hass.async_block_till_done()
+
+    assert coordinator.data is data_before

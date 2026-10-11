@@ -68,6 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Coordinator
     coordinator = ChargeControllerCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
+    entry.async_on_unload(coordinator.async_track_inputs())
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     hass.data[DOMAIN][

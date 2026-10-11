@@ -219,3 +219,29 @@ async def test_entities(hass, ws, easee_device):
     assert charger["target_current_P1"] == "sensor.garage_charger_load_balancing_target_current_p1"
     assert charger["charger_current_P3"] == "sensor.garage_charger_load_balancing_charger_current_p3"
     assert charger["mode"] == "sensor.garage_charger_load_balancing_mode"
+
+
+async def test_settings_defaults(hass, ws):
+    result = await ws("settings/get")
+
+    assert result["result"] == {"charger_update_interval_s": 30}
+
+
+async def test_save_update_interval(hass, ws):
+    result = await ws("settings/save", changes={"charger_update_interval_s": "45"})
+    assert result["success"]
+    assert result["result"] == {"charger_update_interval_s": 45}
+
+    await hass.async_block_till_done()
+    coordinator = hass.data[DOMAIN]["coordinator"]
+    assert coordinator._charger_update_interval().total_seconds() == 45
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"charger_update_interval_s": 29}, {"charger_update_interval_s": 61}, {"unknown": 1}],
+)
+async def test_invalid_settings(hass, ws, changes):
+    result = await ws("settings/save", changes=changes)
+
+    assert result["error"]["code"] == "invalid_format"

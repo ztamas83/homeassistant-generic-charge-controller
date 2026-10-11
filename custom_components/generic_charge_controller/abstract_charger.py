@@ -9,6 +9,10 @@ class AbstractCharger(abc.ABC):
     """Access to a charger. Phases are the charger's own phases P1-P3."""
 
     @abc.abstractmethod
+    def tracked_entity_ids(self) -> list[str]:
+        """Entities whose changes should trigger a new calculation."""
+
+    @abc.abstractmethod
     def phase_currents(self) -> dict[str, float | None]:
         """Current drawn per charger phase in ampere, None if unknown."""
 
