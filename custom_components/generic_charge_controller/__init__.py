@@ -19,7 +19,13 @@ from .const import (
     VERSION
 )
 
+from .devices import (
+    async_remove_stale,
+    charger_device_identifier,
+    household_device_identifier,
+)
 from .store import ChargeControllerStore
+from .unique_ids import expected_unique_ids
 from .coordinator import ChargeControllerCoordinator
 from .websocket_api import async_register_websocket_commands
 
@@ -28,7 +34,7 @@ from homeassistant.components.frontend import (
     async_remove_panel,
 )
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
 PANEL_URL_PATH = "charge-controller"
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -75,6 +81,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         PLATFORMS,
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    store = hass.data[DOMAIN]["store"]
+    households, chargers = store.get_households(), store.get_chargers()
+    async_remove_stale(
+        hass,
+        entry,
+        expected_unique_ids(households, chargers),
+        {
+            *(household_device_identifier(h) for h in households),
+            *(charger_device_identifier(c) for c in chargers),
+        },
+    )
 
     _LOGGER.info(
         "Setup complete for generic_charge_controller entry: %s", entry.entry_id

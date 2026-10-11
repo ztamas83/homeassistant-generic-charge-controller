@@ -44,10 +44,14 @@ async def test_async_setup_entry(mock_hass, mock_config_entry):
         "custom_components.generic_charge_controller.async_register_websocket_commands"
     ) as mock_ws_reg, patch(
         "custom_components.generic_charge_controller._async_register_panel"
-    ) as mock_panel_reg:
+    ) as mock_panel_reg, patch(
+        "custom_components.generic_charge_controller.async_remove_stale"
+    ):
         
         mock_store = mock_store_class.return_value
         mock_store.async_load = AsyncMock()
+        mock_store.get_households.return_value = {}
+        mock_store.get_chargers.return_value = {}
         
         mock_coord = mock_coord_class.return_value
         mock_coord.async_config_entry_first_refresh = AsyncMock()

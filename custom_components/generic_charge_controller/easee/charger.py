@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -16,8 +17,10 @@ from .const import (
     ATTR_PHASE_CURRENT_TMP,
     CHRG_DOMAIN,
     EA_CHARGING,
+    NOT_CONNECTED_STATES,
     S_NAME_CIRCUITCURRENT,
     S_NAME_STATUS,
+    SVC_SET_LIMIT,
 )
 
 
@@ -75,6 +78,11 @@ class EaseeCharger(AbstractCharger):
         state = self.hass.states.get(entity_id) if entity_id else None
         return state is not None and state.state == EA_CHARGING
 
+    def is_connected(self) -> bool:
+        entity_id = self._entity_id(S_NAME_STATUS)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        return state is not None and state.state not in NOT_CONNECTED_STATES
+
     def max_current(self) -> float | None:
         """Rated current of the charger's circuit."""
         entity_id = self._entity_id(S_NAME_STATUS)
@@ -86,3 +94,31 @@ class EaseeCharger(AbstractCharger):
         except (TypeError, ValueError):
             return None
         return value if value > 0 else None
+
+    async def async_set_limits(self, limits: dict[str, int]) -> None:
+        """Set the dynamic circuit limit per phase, without expiry.
+
+        The Easee integration skips the API call when the charger already has
+        these limits, so a time to live could not be refreshed by resending.
+        """
+        await self.hass.services.async_call(
+            CHRG_DOMAIN,
+            SVC_SET_LIMIT,
+            {
+                "device_id": self.device_id,
+                "current_p1": limits["P1"],
+                "current_p2": limits["P2"],
+                "current_p3": limits["P3"],
+                "time_to_live": 0,
+            },
+            blocking=True,
+        )
+
+    async def async_release(self) -> None:
+        """Set the dynamic circuit limit back to the circuit rated current."""
+        rated = self.max_current()
+        if rated is None:
+            raise HomeAssistantError(
+                "Circuit rated current unknown, cannot release the dynamic limit"
+            )
+        await self.async_set_limits({p: int(rated) for p in ("P1", "P2", "P3")})

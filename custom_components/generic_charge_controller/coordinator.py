@@ -30,6 +30,7 @@ from .const import (
     PHASES,
     UPDATE_INTERVAL,
 )
+from .control import LimitSender
 from .loadbalancer.balancer import BalancerConfig, PhaseLoad, SafeLoadBalancer
 from .readings import read_current_a
 
@@ -39,7 +40,8 @@ _LOGGER = logging.getLogger(__name__)
 class ChargeControllerCoordinator(DataUpdateCoordinator):
     """Central coordinator for ChargeController for charger data, state and load balancing.
 
-    Targets are calculated and exposed as sensors only; nothing is sent to chargers.
+    Targets are always calculated and exposed as sensors. They are sent to a charger
+    only while its "load balancing active" switch is on and a car is connected.
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -54,6 +56,30 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.stale_after = timedelta(seconds=DEFAULT_STALE_AFTER_S)
         self._balancers: dict[str, SafeLoadBalancer] = {}
+        self._started_at = dt_util.utcnow()
+        self._active: dict[str, bool] = {}
+        self._senders: dict[str, LimitSender] = {}
+
+    def is_active(self, charger_id: str) -> bool:
+        """Whether limits are sent to the charger."""
+        return self._active.get(charger_id, False)
+
+    def restore_active(self, charger_id: str, active: bool) -> None:
+        """Set the active flag from restored state, without touching the charger."""
+        self._active[charger_id] = active
+
+    async def async_set_active(self, charger_id: str, active: bool) -> None:
+        """Start or stop sending limits to a charger.
+
+        Stopping sets the charger back to its circuit rated current.
+        """
+        self._active[charger_id] = active
+        if not active:
+            self._senders.pop(charger_id, None)
+            config = self.hass.data[DOMAIN]["store"].get_charger(charger_id)
+            if config is not None:
+                await create_charger(self.hass, charger_id, config).async_release()
+        await self.async_request_refresh()
 
     def _balancer(self, charger_id: str, fuse_a: float) -> SafeLoadBalancer:
         """Return the balancer of a charger; it keeps state between updates."""
@@ -94,13 +120,13 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
             household = stored_households.get(household_id)
             if household is None:
                 continue
-            chargers[charger_id] = self._update_charger(
+            chargers[charger_id] = await self._async_update_charger(
                 charger_id, config, household, households[household_id], now
             )
 
         return {"households": households, "chargers": chargers}
 
-    def _update_charger(
+    async def _async_update_charger(
         self,
         charger_id: str,
         config: dict,
@@ -136,15 +162,35 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         else:
             mode = MODE_CHARGING
 
-        for reason in result.reasons:
-            _LOGGER.debug("Charger %s: %s", charger_id, reason)
-
         targets_by_charger_phase = {
             phase_map[phase]: target for phase, target in result.targets.items()
         }
+        reasons = list(result.reasons)
+        active = self.is_active(charger_id)
+        if active:
+            if charger.is_connected():
+                sender = self._senders.setdefault(charger_id, LimitSender(self._started_at))
+                reasons += await sender.async_apply(
+                    charger,
+                    {p: int(v) for p, v in targets_by_charger_phase.items()},
+                    result.failsafe,
+                    now,
+                )
+            else:
+                reasons.append("No car connected, limits not sent")
+
+        for reason in reasons:
+            _LOGGER.debug("Charger %s: %s", charger_id, reason)
+
+        sender = self._senders.get(charger_id)
         return {
             "mode": mode,
-            "reasons": result.reasons,
+            "reasons": reasons,
+            "control_active": active,
+            "last_sent": sender.last_sent if sender else None,
+            "last_sent_at": sender.last_sent_at.isoformat()
+            if sender and sender.last_sent_at
+            else None,
             **{
                 f"target_current_{phase}": targets_by_charger_phase[phase]
                 for phase in CHARGER_PHASES

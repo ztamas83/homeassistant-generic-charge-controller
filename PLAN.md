@@ -87,7 +87,7 @@ Verify:
 - HA: oven/kettle on -> target on that phase drops within one update; a phase sensor unavailable -> mode `failsafe`.
 
 ### Step 3: Actuation behind an enable switch
-Status: [ ] not started
+Status: [x] implemented 2026-10-11, awaiting verification in HA
 
 Changes:
 - Switch entity "Load balancing active", default off, restored on restart. Off = no commands; charger falls back to its own limit when TTL expires.
@@ -154,8 +154,10 @@ Verify:
 
 ## Notes for later steps
 
-- Step 3: Easee (v0.9.74 on the user's HA) service `easee.set_circuit_dynamic_limit` takes `device_id`, `current_p1` (required), `current_p2`, `current_p3` (0-40 A) and `time_to_live`. The old `update_limits` sent `currentP1..3`, which is wrong. Check the TTL unit in `services.py` (`SERVICE_SET_CIRCUIT_CURRENT_SCHEMA_TTL`) before use.
-- Step 3: Easee `circuit_current` (phase currents) is disabled by default in the Easee integration; without it the balancer assumes 0 A charger current (safe, but targets drop while charging). Show a hint in the panel.
+- Step 5: Easee `circuit_current` (phase currents) is disabled by default in the Easee integration; without it the balancer assumes 0 A charger current (safe, but targets drop while charging). Show a hint in the panel.
+- Step 5: show and toggle the "Load balancing active" switch in the panel; show last sent limits.
+- Limits are sent with `time_to_live: 0` (no expiry): the Easee integration skips the API call when the charger already has the requested limits, so a TTL could not be refreshed. Consequence: if HA stops, the charger keeps the last limit. Turning the switch off, or deleting the charger config while active, sets the limit back to the circuit rated current. Removing the whole integration while active does not (unload cannot tell removal from reload); release first.
+- After a car connects, the next update (up to 45 s, step 4 makes it faster) sends the limits; until then the charger uses the last sent limit.
 - Step 6: `make deploy` extracts over the remote folder and never deletes removed files (e.g. old `loadbalancer/calculator.py` stays on HA). Switch to a clean copy.
 - Step 6: `manifest.json` should list `http`, `frontend`, `websocket_api` as dependencies; unused imports in `__init__.py` (`json`, `DATA_HASS_CONFIG`, `VERSION`); old `CONF_*` constants and commented config flow in `config_flow.py`.
 - Easee discovery matches entities by unique id `<serial>_<key>`, confirmed in Easee v0.9.74 (`entity.py`: `f"{product.id}_{entity_name}"`).
@@ -168,3 +170,4 @@ Verify:
 - 2026-10-10: Panel JS URL carries a content hash (no stale browser cache after deploy). Households tab first; chargers grouped per household. 44 tests pass.
 - 2026-10-10: Step 2 implemented. `SafeLoadBalancer` (fail-safe 0 A on unknown/stale household load, unknown charger current assumed 0 A, load rounded up, immediate decrease, 2 A/min ramp-up, whole-ampere targets capped at circuit rated current, below 6 A -> 0). Read-only Easee adapter by unique id, charger factory, shared `readings.read_current_a` with staleness via `last_reported`. Sensors: target and charger current per charger phase, mode (idle/charging/limited/failsafe) with `reasons` attribute. Old calculators and numpy removed. 73 tests pass.
 - 2026-10-10: Panel: charger cards show target currents P1-P3 and load balancing mode; charger detail shows history of targets and mode (own SVG step chart from `history/history_during_period`, 6 h to 7 d, tooltip, table view; HA history-graph card is not usable because `window.loadCardHelpers` is undefined in a custom panel). New WS `entities` returns sensor entity ids per household/charger. 74 tests pass.
+- 2026-10-11: Step 3 implemented. Switch "Load balancing active" per charger (off by default, restored on restart). Limits sent via `easee.set_circuit_dynamic_limit` (`current_p1..3`, TTL 0) only while active and a car is connected; decreases at once, increases at most every 60 s, unchanged limits resent every 5 min, fail-safe held for 120 s after start while meters come up. Switch off and charger delete release to circuit rated current. Mode sensor attributes: `control_active`, `last_sent`, `last_sent_at`. Stale entity cleanup moved to entry setup and covers all platforms. 94 tests pass.
