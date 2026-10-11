@@ -46,13 +46,6 @@ declare global {
       computeHelper?: (schema: HaFormSchema) => string;
       disabled?: boolean;
     };
-    "ha-chart-base": HTMLElement & {
-      hass?: any;
-      data?: unknown;
-      options?: unknown;
-      height?: string;
-      expandLegend?: boolean;
-    };
   }
 }
 

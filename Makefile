@@ -44,22 +44,24 @@ help:
 
 build:
 	@echo "==> Building Frontend"
-	cd frontend && npm install && npm run build
+	cd frontend && npm ci && npm run build
 	@echo "    OK"
 
 deploy: build
 	@echo "==> Deploying to $(SSH_USER)@$(HA_IP):$(SSH_PORT)"
+	@# Extract into a temporary folder and swap it in only after a complete transfer,
+	@# so files removed locally are also removed on Home Assistant
 	@export COPYFILE_DISABLE=1; \
-	$(SSH_CMD) "$(SSH_USER)@$(HA_IP)" \
-		"sudo mkdir -p $(REMOTE_CONFIG)/custom_components/$(COMPONENT_NAME) && \
-		 sudo find $(REMOTE_CONFIG)/custom_components/$(COMPONENT_NAME) -name '__pycache__' -exec rm -rf {} + 2>/dev/null; true"
-	@tar czf - -C "custom_components/$(COMPONENT_NAME)" . | \
-		$(SSH_CMD) "$(SSH_USER)@$(HA_IP)" "sudo tar xzf - -C $(REMOTE_CONFIG)/custom_components/$(COMPONENT_NAME)/"
+	tar czf - --exclude=__pycache__ -C "custom_components/$(COMPONENT_NAME)" . | \
+		$(SSH_CMD) "$(SSH_USER)@$(HA_IP)" \
+		"set -e; dir=$(REMOTE_CONFIG)/custom_components/$(COMPONENT_NAME); \
+		 sudo rm -rf \$$dir.new; sudo mkdir -p \$$dir.new; \
+		 sudo tar xzf - -C \$$dir.new; \
+		 sudo rm -rf \$$dir; sudo mv \$$dir.new \$$dir"
 	@echo "    OK"
 	@echo ""
 	@echo "==> Done! Next steps:"
-	@echo "    - Python changes:        Settings -> Integrations -> Charge Controller -> ⋮ -> Reload"
-	@echo "    - WS schema / manifest:  Full HA restart: make restart-ha"
+	@echo "    - Restart Home Assistant to load the new version: make restart-ha"
 
 restart-ha:
 	@echo "==> Checking configuration on $(SSH_USER)@$(HA_IP):$(SSH_PORT)"

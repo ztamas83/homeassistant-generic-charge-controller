@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import json
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,11 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import (
-    DATA_HASS_CONFIG,
-    DOMAIN,
-    VERSION
-)
+from .const import DOMAIN
 
 from .devices import (
     async_remove_stale,

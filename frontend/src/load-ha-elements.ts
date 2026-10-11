@@ -80,42 +80,4 @@ export const loadHaElements = async (): Promise<void> => {
     customElements.whenDefined("ha-form"),
     new Promise<void>((r) => setTimeout(r, 10_000)),
   ]);
-
-  // Step 3: Load ha-date-range-picker (used by rs-analytics).
-  if (!customElements.get("ha-date-range-picker")) {
-    try {
-      const helpers = await (window as any).loadCardHelpers();
-      await helpers.createCardElement({
-        type: "energy-date-selection",
-        entities: [],
-      });
-      await Promise.race([
-        customElements.whenDefined("ha-date-range-picker"),
-        new Promise((_, reject) => setTimeout(reject, 5000)),
-      ]);
-    } catch {
-      // ha-date-range-picker not available — fallback handled in component
-    }
-  }
-
-  // Step 4: Load ha-chart-base (used by rs-analytics).
-  // It is part of HA's history/energy modules and NOT loaded by the
-  // config panel or card-helpers entities card.  Trigger the import
-  // chain via the statistics-graph lovelace card, which depends on it.
-  if (!customElements.get("ha-chart-base")) {
-    try {
-      const helpers = await (window as any).loadCardHelpers();
-      await helpers.createCardElement({
-        type: "statistics-graph",
-        entities: [],
-      });
-      // Wait up to 5 s for async registration
-      await Promise.race([
-        customElements.whenDefined("ha-chart-base"),
-        new Promise((_, reject) => setTimeout(reject, 5000)),
-      ]);
-    } catch {
-      // ha-chart-base not available – analytics chart will be empty
-    }
-  }
 };
