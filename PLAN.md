@@ -122,7 +122,7 @@ Verify:
 - HA: changing a setting changes computed targets without restart.
 
 ### Step 6: Cleanup
-Status: [ ] not started
+Status: [x] implemented 2026-10-11, awaiting verification in HA
 
 Changes:
 - Remove RoomMind leftovers, commented code in `sensor.py`, `models/charger.py`, unused constants.
@@ -158,8 +158,7 @@ Verify:
 - Limits are sent with `time_to_live: 0` (no expiry): the Easee integration skips the API call when the charger already has the requested limits, so a TTL could not be refreshed. Consequence: if HA stops, the charger keeps the last limit. Turning the switch off, or deleting the charger config while active, sets the limit back to the circuit rated current. Removing the whole integration while active does not (unload cannot tell removal from reload); release first.
 - After a car connects, the status change triggers a calculation; limits are sent at once if nothing was sent in the last charger update interval, otherwise when it has passed.
 - Since step 4 the household load sensors update with every triggered refresh (up to every 3 s), so the recorder stores them about as often as the meter sensors. Exclude them in `recorder:` if database size matters.
-- Step 6: `make deploy` extracts over the remote folder and never deletes removed files (e.g. old `loadbalancer/calculator.py` stays on HA). Switch to a clean copy.
-- Step 6: `manifest.json` should list `http`, `frontend`, `websocket_api` as dependencies; unused imports in `__init__.py` (`json`, `DATA_HASS_CONFIG`, `VERSION`); old `CONF_*` constants and commented config flow in `config_flow.py`.
+- Tests mark `frontend` as loaded (fixture `mock_panel`) because the `home-assistant-frontend` package is not installed in the test environment.
 - Easee discovery matches entities by unique id `<serial>_<key>`, confirmed in Easee v0.9.74 (`entity.py`: `f"{product.id}_{entity_name}"`).
 - Settings (`SETTINGS_RANGES` in `const.py`): charger update interval 30-60 s (30), safety margin 0-5 A (1), ramp-up 1-10 A/min (2), stale after 60-600 s (120). Minimum charging current 6 A stays fixed.
 
@@ -175,3 +174,4 @@ Verify:
 - 2026-10-11: Step 4 revised on request: fuses tolerate overload for 1-2 minutes, so sending to the charger is limited to once per "charger update interval" (setting, 30-60 s, default 30, Settings tab in the panel). Calculation stays event-driven. Exception: a household phase above 150 % of the fuse for more than 10 s sends lower limits at once. A scheduled recheck sends held-back limits when the interval has passed and confirms a pending overload after 10 s, even without sensor changes. Watchdog update every 30 s. The old rules (decreases at once, increases every 60 s) are replaced. Mode sensor attribute `overload`. 110 tests pass.
 - 2026-10-11: Step 5 implemented. Settings for safety margin, ramp-up speed and stale timeout (validated, defaults, reload on save, Settings tab with helper texts). Charger detail: live status card (switch state with Start/Stop, mode and reasons, per phase household load, charger current and target, fuse, margin, update interval, last sent limits) and a hint when the Easee `circuit_current` entity is disabled (discovery reports disabled entities). Charger cards show whether limits are sent. WS `entities` includes the switch. 118 tests pass.
 - 2026-10-11: Charger configuration card is collapsible (header toggles, summary when collapsed); collapsed when configured, expanded when not, collapses after saving.
+- 2026-10-11: Step 6 implemented. Removed unused modules (`exceptions.py`, `models/`, `utils/history_store.py`), constants, old config flow code, RoomMind types, unused panel styles and element loading, unused npm dependency. Config flow only confirms (single config entry via manifest), translations in `translations/en.json`. Manifest: name, dependencies `frontend`/`http`/`websocket_api`, version 0.2.0, issue tracker. `make deploy` replaces the remote folder via a temporary folder (removed files disappear), `make build` uses `npm ci`. README rewritten, `.env.example` added, `hacs.json` minimum HA 2026.10.0. 120 tests pass.

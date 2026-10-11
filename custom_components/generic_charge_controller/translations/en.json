@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Charge Controller",
+        "description": "Set up the charge controller. Households and chargers are configured afterwards in the Charge Controller panel in the sidebar."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "The charge controller is already set up."
+    }
+  }
+}

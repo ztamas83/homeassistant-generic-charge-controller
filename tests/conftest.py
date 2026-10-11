@@ -89,8 +89,13 @@ def storage_data(households: dict | None = None, chargers: dict | None = None) -
 
 
 @pytest.fixture
-def mock_panel():
-    """Skip sidebar panel registration, which needs the http component."""
+def mock_panel(hass):
+    """Skip the sidebar panel and treat the frontend dependency as loaded.
+
+    The frontend component needs the home-assistant-frontend package, which is
+    not part of the test environment.
+    """
+    hass.config.components.add("frontend")
     with patch("custom_components.generic_charge_controller._async_register_panel"):
         yield
 
