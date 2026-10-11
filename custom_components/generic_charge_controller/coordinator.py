@@ -7,7 +7,15 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    Event,
+    EventStateChangedData,
+    HomeAssistant,
+    callback,
+)
+from homeassistant.helpers.debounce import Debouncer
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -27,10 +35,14 @@ from .const import (
     MODE_FAILSAFE,
     MODE_IDLE,
     MODE_LIMITED,
+    OVERLOAD_DURATION_S,
+    OVERLOAD_FACTOR,
     PHASES,
+    REFRESH_COOLDOWN_S,
+    SETTING_CHARGER_UPDATE_INTERVAL,
     UPDATE_INTERVAL,
 )
-from .control import LimitSender
+from .control import LimitSender, OverloadDetector
 from .loadbalancer.balancer import BalancerConfig, PhaseLoad, SafeLoadBalancer
 from .readings import read_current_a
 
@@ -52,6 +64,9 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
             config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            request_refresh_debouncer=Debouncer(
+                hass, _LOGGER, cooldown=REFRESH_COOLDOWN_S, immediate=True
+            ),
         )
         self.entry = entry
         self.stale_after = timedelta(seconds=DEFAULT_STALE_AFTER_S)
@@ -59,6 +74,68 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self._started_at = dt_util.utcnow()
         self._active: dict[str, bool] = {}
         self._senders: dict[str, LimitSender] = {}
+        self._overload_detectors: dict[str, OverloadDetector] = {}
+        self._recheck_cancel: CALLBACK_TYPE | None = None
+        self._recheck_at: datetime | None = None
+
+    def _charger_update_interval(self) -> timedelta:
+        settings = self.hass.data[DOMAIN]["store"].get_settings()
+        return timedelta(seconds=settings[SETTING_CHARGER_UPDATE_INTERVAL])
+
+    @callback
+    def _schedule_recheck(self, delay_s: float, now: datetime) -> None:
+        """Recalculate after delay_s, unless an earlier recalculation is scheduled.
+
+        Used when limits are held back by the update interval, or an overload is
+        about to count as sustained, while input sensors might not change.
+        """
+        when = now + timedelta(seconds=delay_s)
+        if self._recheck_cancel is not None and self._recheck_at is not None:
+            if self._recheck_at <= when:
+                return
+            self._recheck_cancel()
+
+        @callback
+        def _async_recheck(_now: datetime) -> None:
+            self._recheck_cancel = None
+            self._recheck_at = None
+            self.hass.async_create_task(self.async_request_refresh())
+
+        self._recheck_cancel = async_call_later(self.hass, delay_s, _async_recheck)
+        self._recheck_at = when
+
+    async def async_shutdown(self) -> None:
+        """Cancel a scheduled recalculation."""
+        if self._recheck_cancel is not None:
+            self._recheck_cancel()
+            self._recheck_cancel = None
+        await super().async_shutdown()
+
+    @callback
+    def async_track_inputs(self) -> CALLBACK_TYPE:
+        """Recalculate when a household phase sensor or a charger entity changes.
+
+        Returns a function that stops tracking.
+        """
+        store = self.hass.data[DOMAIN]["store"]
+        entity_ids = {
+            entity_id
+            for household in store.get_households().values()
+            for key in HH_PHASE_ENTITIES.values()
+            if (entity_id := household.get(key))
+        }
+        for charger_id, config in store.get_chargers().items():
+            entity_ids.update(create_charger(self.hass, charger_id, config).tracked_entity_ids())
+
+        _LOGGER.debug("Tracking %s", sorted(entity_ids))
+
+        @callback
+        def _async_input_changed(event: Event[EventStateChangedData]) -> None:
+            self.hass.async_create_task(self.async_request_refresh())
+
+        return async_track_state_change_event(
+            self.hass, sorted(entity_ids), _async_input_changed
+        )
 
     def is_active(self, charger_id: str) -> bool:
         """Whether limits are sent to the charger."""
@@ -166,16 +243,36 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
             phase_map[phase]: target for phase, target in result.targets.items()
         }
         reasons = list(result.reasons)
+
+        overload, overload_pending_s = self._overload_detectors.setdefault(
+            config[CH_HOUSEHOLD], OverloadDetector()
+        ).update(household_loads, float(household[HH_FUSE]), now)
+        if overload:
+            reasons.append(
+                f"Household load above {OVERLOAD_FACTOR:.0%} of the fuse "
+                f"for more than {OVERLOAD_DURATION_S} s"
+            )
+        elif overload_pending_s is not None:
+            self._schedule_recheck(overload_pending_s + 0.5, now)
+
         active = self.is_active(charger_id)
         if active:
             if charger.is_connected():
-                sender = self._senders.setdefault(charger_id, LimitSender(self._started_at))
-                reasons += await sender.async_apply(
+                sender = self._senders.get(charger_id)
+                if sender is None:
+                    sender = self._senders[charger_id] = LimitSender(
+                        self._started_at, self._charger_update_interval()
+                    )
+                pending, send_reasons = await sender.async_apply(
                     charger,
                     {p: int(v) for p, v in targets_by_charger_phase.items()},
                     result.failsafe,
+                    overload,
                     now,
                 )
+                reasons += send_reasons
+                if pending and (due := sender.seconds_until_due(now)) is not None:
+                    self._schedule_recheck(due + 0.5, now)
             else:
                 reasons.append("No car connected, limits not sent")
 
@@ -187,6 +284,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
             "mode": mode,
             "reasons": reasons,
             "control_active": active,
+            "overload": overload,
             "last_sent": sender.last_sent if sender else None,
             "last_sent_at": sender.last_sent_at.isoformat()
             if sender and sender.last_sent_at

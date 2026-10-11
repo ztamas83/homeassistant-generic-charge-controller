@@ -11,6 +11,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import (
     CH_ID,
+    DEFAULT_SETTINGS,
     DOMAIN,
     HH_ID,
     STORE_KEY_CHARGERS,
@@ -122,11 +123,11 @@ class ChargeControllerStore:
 
     # Settings operations
     def get_settings(self) -> dict:
-        """Return a deep copy of global settings."""
-        return copy.deepcopy(self._settings)
+        """Return global settings, with defaults for settings never saved."""
+        return {**DEFAULT_SETTINGS, **copy.deepcopy(self._settings)}
 
     async def async_save_settings(self, changes: dict) -> dict:
         """Merge changes into global settings and persist."""
         self._settings.update(changes)
         await self._async_save()
-        return copy.deepcopy(self._settings)
+        return self.get_settings()

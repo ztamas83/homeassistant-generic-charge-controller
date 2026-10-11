@@ -14,8 +14,9 @@ import "./components/cc-load-balancer-settings";
 import "./components/cc-household-card";
 import "./components/cc-household-editor";
 import "./components/cc-charger-history";
+import "./components/cc-settings";
 
-type TabId = "households" | "chargers";
+type TabId = "households" | "chargers" | "settings";
 
 const WS = "generic_charge_controller";
 
@@ -116,6 +117,12 @@ export class ChargeControllerPanel extends LitElement {
               >
                 Chargers
               </div>
+              <div
+                class="tab ${this._activeTab === "settings" ? "active" : ""}"
+                @click=${() => (this._activeTab = "settings")}
+              >
+                Settings
+              </div>
             </div>
           `
           : nothing}
@@ -128,7 +135,9 @@ export class ChargeControllerPanel extends LitElement {
           ? this._renderDetail(selectedCharger)
           : this._activeTab === "households"
             ? this._renderHouseholds()
-            : this._renderChargers(chargers)}
+            : this._activeTab === "chargers"
+              ? this._renderChargers(chargers)
+              : html`<div class="detail-view"><cc-settings .hass=${this.hass}></cc-settings></div>`}
       </div>
     `;
   }

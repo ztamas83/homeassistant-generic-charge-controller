@@ -59,6 +59,14 @@ class EaseeCharger(AbstractCharger):
             Platform.SENSOR, CHRG_DOMAIN, f"{self.serial}_{key}"
         )
 
+    def tracked_entity_ids(self) -> list[str]:
+        """Status (car connects, starts charging) and circuit current."""
+        return [
+            entity_id
+            for key in (S_NAME_STATUS, S_NAME_CIRCUITCURRENT)
+            if (entity_id := self._entity_id(key))
+        ]
+
     def phase_currents(self) -> dict[str, float | None]:
         """Circuit current per phase, from the circuit_current sensor attributes."""
         entity_id = self._entity_id(S_NAME_CIRCUITCURRENT)

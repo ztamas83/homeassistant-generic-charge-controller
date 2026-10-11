@@ -156,6 +156,7 @@ class ChargerModeSensor(_ChargerSensor):
         return {
             "reasons": charger.get("reasons", []),
             "control_active": charger.get("control_active", False),
+            "overload": charger.get("overload", False),
             "last_sent": charger.get("last_sent"),
             "last_sent_at": charger.get("last_sent_at"),
         }
