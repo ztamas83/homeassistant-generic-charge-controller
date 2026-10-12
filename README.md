@@ -52,8 +52,10 @@ turn it off before removing the integration.
 
 ### Manual
 
-1. Copy `custom_components/generic_charge_controller` into the
-   `custom_components` folder of your Home Assistant configuration.
+1. Download `generic_charge_controller.zip` from the latest
+   [release](https://github.com/ztamas83/homeassistant-generic-charge-controller/releases)
+   and extract it into `custom_components/generic_charge_controller` in your
+   Home Assistant configuration.
 2. Restart Home Assistant.
 
 ## Setup
@@ -95,6 +97,22 @@ and fill in the SSH details (see the comments in the file), then:
 | `make test` | Run the tests |
 | `make deploy` | Build and copy the integration to Home Assistant (replaces the folder) |
 | `make restart-ha` | Check the configuration and restart Home Assistant Core |
+| `make release VERSION=x.y.z` | Set the manifest version, commit, tag `vx.y.z` and push |
 | `make clean` | Remove local `__pycache__` folders |
+
+### Releases
+
+Development happens on `master`; releases are tags on it.
+
+```bash
+make release VERSION=0.3.0
+```
+
+This sets `version` in `manifest.json`, commits, tags `v0.3.0` and pushes both.
+The tag triggers the release workflow: it runs the tests, hassfest and HACS
+validation, checks the tag matches the manifest version, builds the panel and
+publishes a GitHub release with `generic_charge_controller.zip`. HACS offers
+that release as an update. A version with a suffix (`0.3.0-beta.1`) becomes a
+GitHub pre-release, which HACS shows only to users who enabled beta versions.
 
 The work plan and design decisions are in [PLAN.md](PLAN.md).
