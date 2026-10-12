@@ -81,7 +81,7 @@ release:
 	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "Tag v$(VERSION) already exists"; exit 1; }
 	@echo "==> Releasing v$(VERSION)"
 	jq --indent 2 '.version = "$(VERSION)"' $(MANIFEST) > $(MANIFEST).tmp && mv $(MANIFEST).tmp $(MANIFEST)
-	git commit -m "Release v$(VERSION)" $(MANIFEST)
+	git diff --quiet $(MANIFEST) || git commit -m "Release v$(VERSION)" $(MANIFEST)
 	git tag -a "v$(VERSION)" -m "v$(VERSION)"
 	git push --atomic origin master "v$(VERSION)"
 	@echo "    OK, the release workflow publishes the GitHub release"
