@@ -1,6 +1,7 @@
 {
     "name": "Generic Charge Controller",
     "hide_default_branch": true,
-    "zip_release": false,
+    "zip_release": true,
+    "filename": "generic_charge_controller.zip",
     "homeassistant": "2026.10.0"
 }
