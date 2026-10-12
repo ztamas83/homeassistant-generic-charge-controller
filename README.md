@@ -116,3 +116,7 @@ that release as an update. A version with a suffix (`0.3.0-beta.1`) becomes a
 GitHub pre-release, which HACS shows only to users who enabled beta versions.
 
 The work plan and design decisions are in [PLAN.md](PLAN.md).
+
+## License
+
+[MIT](LICENSE)
