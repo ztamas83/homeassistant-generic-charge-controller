@@ -1,4 +1,7 @@
 /**
+ * Based on RoomMind (https://github.com/snazzybean/roommind),
+ * Copyright (c) 2026 SnazzyBean, MIT License. See THIRD_PARTY_NOTICES.
+ *
  * Type declarations for Home Assistant built-in web components.
  * These are loaded at runtime via load-ha-elements.ts, not from npm.
  */

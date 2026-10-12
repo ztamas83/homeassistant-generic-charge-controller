@@ -1,4 +1,7 @@
 /**
+ * Based on RoomMind (https://github.com/snazzybean/roommind),
+ * Copyright (c) 2026 SnazzyBean, MIT License. See THIRD_PARTY_NOTICES.
+ *
  * Force-load Home Assistant's built-in web components so custom panels
  * can use <ha-card>, <ha-button>, <ha-select>, <ha-entity-picker>, etc.
  *

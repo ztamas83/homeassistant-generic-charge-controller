@@ -120,3 +120,7 @@ The work plan and design decisions are in [PLAN.md](PLAN.md).
 ## License
 
 [MIT](LICENSE)
+
+Parts of the panel frontend are based on
+[RoomMind](https://github.com/snazzybean/roommind) (MIT), see
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
