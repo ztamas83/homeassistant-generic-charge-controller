@@ -99,6 +99,11 @@ export class CcEvDetail extends LitElement {
   }
 
   private _socControl(key: "current_soc" | "target_soc", label: string) {
+    const sensor = key === "current_soc" ? this.ev.soc_entity : null;
+    const value = this._numberValue(key) ?? (key === "current_soc" ? this._info?.soc : undefined);
+    const sensorName = sensor
+      ? (this.hass.states[sensor]?.attributes?.friendly_name ?? sensor)
+      : null;
     return html`
       <ha-selector
         .hass=${this.hass}
@@ -106,10 +111,11 @@ export class CcEvDetail extends LitElement {
         .selector=${{
           number: { min: 0, max: 100, step: 1, mode: "slider", unit_of_measurement: "%" },
         }}
-        .value=${this._numberValue(key)}
-        .disabled=${!this.entities[key]}
+        .value=${value}
+        .disabled=${!this.entities[key] || !!sensor}
         @value-changed=${(e: CustomEvent) => this._setNumber(key, e.detail.value)}
       ></ha-selector>
+      ${sensorName ? html`<div class="helper">From ${sensorName}</div>` : nothing}
     `;
   }
 
@@ -225,6 +231,12 @@ export class CcEvDetail extends LitElement {
       display: flex;
       flex-direction: column;
       gap: 16px;
+    }
+
+    .helper {
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      margin: -4px 0 8px;
     }
 
     .row {

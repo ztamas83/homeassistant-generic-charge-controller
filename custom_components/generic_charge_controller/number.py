@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from homeassistant.components.number import NumberMode, RestoreNumber
+from homeassistant.components.number import NumberExtraStoredData, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, EV_SOC_ENTITY
@@ -22,7 +23,7 @@ class _SocNumber(EvEntity, RestoreNumber):
 
 
 class CurrentSocNumber(_SocNumber):
-    """Manual state of charge. Unavailable when a SOC sensor is configured."""
+    """Current state of charge: manual or estimated, or read-only from a SOC sensor."""
 
     _key = "current_soc"
     _attr_icon = "mdi:battery-50"
@@ -34,14 +35,29 @@ class CurrentSocNumber(_SocNumber):
             self._manager.restore_current_soc(self._ev_id, float(last.native_value))
 
     @property
-    def native_value(self) -> float:
-        return self._state.manual_soc
+    def extra_restore_state_data(self) -> NumberExtraStoredData:
+        # Keep the manual value, never the sensor value
+        return NumberExtraStoredData(
+            self.native_max_value,
+            self.native_min_value,
+            self.native_step,
+            self.native_unit_of_measurement,
+            self._state.manual_soc,
+        )
 
     @property
-    def available(self) -> bool:
-        return not self._state.config.get(EV_SOC_ENTITY)
+    def native_value(self) -> float:
+        return self._manager.effective_soc(self._ev_id)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        if entity_id := self._state.config.get(EV_SOC_ENTITY):
+            return {"source": "sensor", "source_entity": entity_id}
+        return {"source": "manual"}
 
     async def async_set_native_value(self, value: float) -> None:
+        if entity_id := self._state.config.get(EV_SOC_ENTITY):
+            raise ServiceValidationError(f"Battery level comes from {entity_id}")
         await self._manager.async_set_current_soc(self._ev_id, value)
 
 
