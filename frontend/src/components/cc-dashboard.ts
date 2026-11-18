@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing } from "lit";
+import { LitElement, html, svg, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   ChargerConfig,
@@ -327,7 +327,7 @@ export class CcDashboard extends LitElement {
     const t0 = Date.now();
     const t1 = t0 + WINDOW_H * HOUR_MS;
     const W = 1000;
-    const H = 40;
+    const H = 80;
     const x = (t: number) => ((Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0)) * W;
     const slots = prices
       .map((p) => ({ s: Date.parse(p.start), e: Date.parse(p.end), v: p.price }))
@@ -354,16 +354,16 @@ export class CcDashboard extends LitElement {
       <div class="timeline">
         <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
           ${hourTicks.map(
-            (t) => html`<line class="tick" x1=${x(t)} x2=${x(t)} y1="0" y2=${H}></line>`,
+            (t) => svg`<line class="tick" x1=${x(t)} x2=${x(t)} y1="0" y2=${H}></line>`,
           )}
           ${blocks
             .filter((b) => Date.parse(b.end) > t0 && Date.parse(b.start) < t1)
             .map(
               (b) =>
-                html`<rect class="block" x=${x(Date.parse(b.start))} y="0"
+                svg`<rect class="block" x=${x(Date.parse(b.start))} y="0"
                   width=${Math.max(2, x(Date.parse(b.end)) - x(Date.parse(b.start)))} height=${H}></rect>`,
             )}
-          ${d ? html`<path class="price" d=${d} fill="none"></path>` : nothing}
+          ${d ? svg`<path class="price" d=${d} fill="none"></path>` : nothing}
         </svg>
         <div class="axis">
           <span>Now</span>
@@ -602,7 +602,7 @@ export class CcDashboard extends LitElement {
     .timeline svg {
       display: block;
       width: 100%;
-      height: 40px;
+      height: 80px;
       background: var(--secondary-background-color);
       border-radius: 4px;
     }
