@@ -55,6 +55,7 @@ class LimitSender:
     - The first limits are sent at once.
     - After that, changed limits are sent when the update interval has passed
       since the last send.
+    - A user-requested pause or release (immediate) is sent at once.
     - A sustained overload sends lower limits at once, regardless of the interval.
     - Unchanged limits are resent after the reconcile interval, so changes made
       outside the integration are corrected.
@@ -69,7 +70,12 @@ class LimitSender:
         self.last_sent_at: datetime | None = None
 
     def _should_send(
-        self, limits: dict[str, int], failsafe: bool, overload: bool, now: datetime
+        self,
+        limits: dict[str, int],
+        failsafe: bool,
+        overload: bool,
+        now: datetime,
+        immediate: bool = False,
     ) -> tuple[bool, str | None]:
         if self.last_sent is None or self.last_sent_at is None:
             in_grace = now - self._started_at < timedelta(seconds=CONTROL_STARTUP_GRACE_S)
@@ -78,6 +84,8 @@ class LimitSender:
             return True, None
 
         since_last = now - self.last_sent_at
+        if immediate and limits != self.last_sent:
+            return True, None
         if overload and any(limits[p] < self.last_sent[p] for p in limits):
             return True, None
         if limits == self.last_sent:
@@ -100,13 +108,15 @@ class LimitSender:
         failsafe: bool,
         overload: bool,
         now: datetime,
+        immediate: bool = False,
     ) -> tuple[bool, list[str]]:
         """Send limits when due.
 
         Returns whether limits are still waiting to be sent, and reasons for
-        limits that were not sent.
+        limits that were not sent. immediate skips the update interval, used when
+        the user changes smart charging (pause or release).
         """
-        send, reason = self._should_send(limits, failsafe, overload, now)
+        send, reason = self._should_send(limits, failsafe, overload, now, immediate)
         if not send:
             return reason is not None, [reason] if reason else []
 

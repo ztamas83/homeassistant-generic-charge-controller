@@ -69,7 +69,7 @@ export class CcDashboard extends LitElement {
   private _signature(evId: string): string {
     const e = this.entities.evs?.[evId] ?? {};
     const s = (id?: string) => (id ? (this.hass?.states[id]?.state ?? "") : "");
-    return `${s(e.status)}|${s(e.charge_now)}|${s(e.force_charge)}`;
+    return `${s(e.status)}|${s(e.charge_now)}|${s(e.smart_charging)}`;
   }
 
   private _fetchAll() {
@@ -183,6 +183,21 @@ export class CcDashboard extends LitElement {
     `;
   }
 
+  private _renderAction(label: string, icon: string, entityId: string | undefined) {
+    if (!entityId) return nothing;
+    return html`
+      <button
+        class="tbtn"
+        @click=${(e: Event) => {
+          e.stopPropagation();
+          this.hass.callService("button", "press", { entity_id: entityId });
+        }}
+      >
+        <ha-icon icon=${icon}></ha-icon>${label}
+      </button>
+    `;
+  }
+
   private _renderEv(ev: EvConfig) {
     const entry = this._plans[ev.ev_id];
     const info = entry?.info;
@@ -229,7 +244,7 @@ export class CcDashboard extends LitElement {
             : nothing}
           <div class="toggles">
             ${this._renderToggle("Smart charging", "mdi:brain", ents.smart_charging)}
-            ${this._renderToggle("Charge now", "mdi:flash", ents.force_charge)}
+            ${this._renderAction("Charge now", "mdi:flash", ents.start_charging)}
           </div>
         </div>
       </ha-card>

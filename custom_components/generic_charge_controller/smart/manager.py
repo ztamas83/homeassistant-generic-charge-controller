@@ -69,7 +69,6 @@ class EvState:
     target_soc: float = float(EV_DEFAULT_TARGET_SOC)
     smart_enabled: bool = True
     control_enabled: bool = True
-    force_charge: bool = False  # "Charge now" override, never restored
     charger_active: bool = False  # the charger is delivering power (from the charger ticks)
     plan: ChargePlan | None = None
     status: str = STATUS_DISABLED
@@ -218,20 +217,20 @@ class SmartChargingManager:
 
     async def async_set_smart_enabled(self, ev_id: str, value: bool) -> None:
         if st := self._states.get(ev_id):
-            if value and not st.smart_enabled:
-                self._mark_dirty(st)
+            if value:
+                self._mark_dirty(st)  # replan from now with the current inputs
             st.smart_enabled = value
-            await self.async_update()
+            # Pause (on) or release (off) the charger in the same cycle
+            await self.async_update(immediate_ev=ev_id)
 
     async def async_set_control_enabled(self, ev_id: str, value: bool) -> None:
         if st := self._states.get(ev_id):
             st.control_enabled = value
             await self.async_update()
 
-    async def async_set_force_charge(self, ev_id: str, value: bool) -> None:
-        if st := self._states.get(ev_id):
-            st.force_charge = value
-            await self.async_update(force_refresh=True)
+    async def async_start_charging(self, ev_id: str) -> None:
+        """Charge now: smart charging off, which releases the charger at once."""
+        await self.async_set_smart_enabled(ev_id, False)
 
     @staticmethod
     def _mark_dirty(st: EvState) -> None:
@@ -292,8 +291,6 @@ class SmartChargingManager:
         """True inside a planned block, False when the charger should pause, None for no opinion."""
         ev_id = self.ev_for_charger(charger_id)
         st = self._states.get(ev_id) if ev_id else None
-        if st is not None and st.force_charge:
-            return True  # user override, load balancing still applies
         if st is None or not st.smart_enabled or not st.control_enabled:
             return None
         if st.connected is False:
@@ -399,8 +396,6 @@ class SmartChargingManager:
         return st.plan is not None and any(b.start <= now for b in st.plan.blocks)
 
     def _status(self, st: EvState, now: datetime) -> str:
-        if st.force_charge and st.charger_active:
-            return STATUS_CHARGING
         if not st.smart_enabled:
             return STATUS_DISABLED
         if st.session_completed:
@@ -420,13 +415,14 @@ class SmartChargingManager:
             return STATUS_INSUFFICIENT_TIME
         return STATUS_PLANNED
 
-    async def async_update(self, force_refresh: bool = False) -> None:
+    async def async_update(
+        self, force_refresh: bool = False, immediate_ev: str | None = None
+    ) -> None:
         """Refresh prices, replan where the rules say so and update statuses."""
         async with self._lock:
             now = dt_util.utcnow()
             old_allowed = {ev_id: st.allowed for ev_id, st in self._states.items()}
             plans_changed = False
-            forced_off = False
 
             for ev_id, st in self._states.items():
                 st.price_key = self._price_key(st)
@@ -449,10 +445,6 @@ class SmartChargingManager:
                     st.soc,
                     st.config.get(EV_MODEL) or EV_DEFAULT_MODEL,
                 )
-
-                if st.force_charge and st.energy_needed_kwh <= ENERGY_EPSILON_KWH:
-                    st.force_charge = False  # target reached
-                    forced_off = True
 
                 had_plan = st.plan
                 new_prices = (
@@ -483,10 +475,17 @@ class SmartChargingManager:
             if plans_changed:
                 self._plans_store.async_delay_save(self._plans_data, SAVE_DELAY_S)
 
-            changed = force_refresh or forced_off or any(old_allowed[ev_id] != st.allowed for ev_id, st in self._states.items())
+            changed = force_refresh or any(
+                old_allowed[ev_id] != st.allowed for ev_id, st in self._states.items()
+            )
 
         self._notify()
-        if changed:
+        immediate_state = self._states.get(immediate_ev) if immediate_ev else None
+        if immediate_state is not None:
+            await self._coordinator.async_refresh_now(
+                immediate_state.config.get(EV_CHARGER_ID) or ""
+            )
+        elif changed:
             await self._coordinator.async_request_refresh()
 
     def _plans_data(self) -> dict[str, dict]:
@@ -531,8 +530,7 @@ class SmartChargingManager:
             return
         if not connected:
             # Unplugged: drop the plan and release the charger
-            changed = st.plan is not None or st.session_completed or st.force_charge
-            st.force_charge = False
+            changed = st.plan is not None or st.session_completed
             st.plan = None
             st.slots_end = None
             st.session_completed = False
@@ -620,5 +618,4 @@ class SmartChargingManager:
             "deadline": deadline.isoformat() if deadline else None,
             "control_enabled": st.control_enabled,
             "smart_enabled": st.smart_enabled,
-            "force_charge": st.force_charge,
         }

@@ -46,8 +46,10 @@
     },
     "switch": {
       "smart_charging": { "name": "Smart charging" },
-      "control_charger": { "name": "Control charger" },
-      "force_charge": { "name": "Charge now" }
+      "control_charger": { "name": "Control charger" }
+    },
+    "button": {
+      "start_charging": { "name": "Charge now" }
     },
     "binary_sensor": {
       "charge_now": { "name": "Charge now" }
