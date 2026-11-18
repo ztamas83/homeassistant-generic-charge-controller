@@ -37,6 +37,7 @@ PLATFORMS = [
     Platform.SWITCH,
     Platform.NUMBER,
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
 ]
 PANEL_URL_PATH = "charge-controller"
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)

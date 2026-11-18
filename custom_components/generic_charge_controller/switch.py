@@ -115,23 +115,6 @@ class ControlChargerSwitch(_EvSwitch):
         await self._manager.async_set_control_enabled(self._ev_id, False)
 
 
-class ForceChargeSwitch(EvEntity, SwitchEntity):
-    """Charge now: override the plan until unplugged or the target is reached. Not restored."""
-
-    _key = "force_charge"
-    _attr_icon = "mdi:lightning-bolt"
-
-    @property
-    def is_on(self) -> bool:
-        return self._state.force_charge
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._manager.async_set_force_charge(self._ev_id, True)
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._manager.async_set_force_charge(self._ev_id, False)
-
-
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -151,6 +134,5 @@ async def async_setup_entry(
         for entity in (
             SmartChargingSwitch(smart, ev_id),
             ControlChargerSwitch(smart, ev_id),
-            ForceChargeSwitch(smart, ev_id),
         )
     )

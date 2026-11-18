@@ -80,6 +80,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self._overload_detectors: dict[str, OverloadDetector] = {}
         self._recheck_cancel: CALLBACK_TYPE | None = None
         self._recheck_at: datetime | None = None
+        self._immediate: set[str] = set()
 
     def _charger_update_interval(self) -> timedelta:
         return timedelta(seconds=self._settings[SETTING_CHARGER_UPDATE_INTERVAL])
@@ -105,6 +106,11 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
 
         self._recheck_cancel = async_call_later(self.hass, delay_s, _async_recheck)
         self._recheck_at = when
+
+    async def async_refresh_now(self, charger_id: str) -> None:
+        """Recalculate at once; limits for this charger skip the update interval."""
+        self._immediate.add(charger_id)
+        await self.async_refresh()
 
     async def async_shutdown(self) -> None:
         """Cancel a scheduled recalculation."""
@@ -266,6 +272,8 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         elif overload_pending_s is not None:
             self._schedule_recheck(overload_pending_s + 0.5, now)
 
+        immediate = charger_id in self._immediate
+        self._immediate.discard(charger_id)
         active = self.is_active(charger_id)
         if active:
             if charger.is_connected():
@@ -280,6 +288,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
                     result.failsafe,
                     overload,
                     now,
+                    immediate,
                 )
                 reasons += send_reasons
                 if pending and (due := sender.seconds_until_due(now)) is not None:
