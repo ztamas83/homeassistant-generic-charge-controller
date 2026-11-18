@@ -328,6 +328,10 @@ class SmartChargingManager:
             )
         return dt_util.as_utc(deadline)
 
+    def effective_soc(self, ev_id: str) -> float:
+        st = self._states.get(ev_id)
+        return self._effective_soc(st) if st else 0.0
+
     def _effective_soc(self, st: EvState) -> float:
         entity_id = st.config.get(EV_SOC_ENTITY)
         if entity_id and (state := self.hass.states.get(entity_id)) is not None:

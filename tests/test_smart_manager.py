@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.core import State, SupportsResponse
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -238,16 +239,55 @@ async def test_no_price_source(hass, start):
 async def test_soc_sensor_overrides_manual(hass, start):
     hass.states.async_set("sensor.car_soc", "70")
     await start(soc_entity="sensor.car_soc")
-    assert hass.states.get(CURRENT_SOC).state == "unavailable"
     assert float(hass.states.get("sensor.car_energy_needed").state) == pytest.approx(5)
 
     hass.states.async_set("sensor.car_soc", "80")
     await hass.async_block_till_done()
+    assert float(hass.states.get(CURRENT_SOC).state) == 80
     assert hass.states.get(STATUS).state == "no_charging_needed"
 
     hass.states.async_set("sensor.car_soc", "unavailable")  # falls back to manual 0 %
     await hass.async_block_till_done()
     assert float(hass.states.get("sensor.car_energy_needed").state) == pytest.approx(40)
+    assert float(hass.states.get(CURRENT_SOC).state) == 0
+
+
+async def test_current_soc_shows_sensor_read_only(hass, start):
+    hass.states.async_set("sensor.car_soc", "70")
+    await start(soc_entity="sensor.car_soc")
+    state = hass.states.get(CURRENT_SOC)
+    assert float(state.state) == 70
+    assert state.attributes["source"] == "sensor"
+    assert state.attributes["source_entity"] == "sensor.car_soc"
+    with pytest.raises(ServiceValidationError):
+        await set_number(hass, CURRENT_SOC, 50)
+    assert manager(hass).state("ev1").manual_soc == 0
+
+
+async def test_current_soc_manual_without_sensor(hass, start):
+    await start()
+    await set_number(hass, CURRENT_SOC, 35)
+    state = hass.states.get(CURRENT_SOC)
+    assert float(state.state) == 35
+    assert state.attributes["source"] == "manual"
+
+
+async def test_manual_soc_kept_when_sensor_removed(hass, start):
+    hass.states.async_set("sensor.car_soc", "70")
+    await start(soc_entity="sensor.car_soc")
+    manager(hass).state("ev1").manual_soc = 33  # last manual or estimated value
+    assert float(hass.states.get(CURRENT_SOC).state) == 70
+
+    # The restored value is the manual one, not the sensor value
+    entity = hass.data["entity_components"]["number"].get_entity(CURRENT_SOC)
+    assert entity.extra_restore_state_data.native_value == 33
+
+    # After removing the sensor the manual value is used again
+    manager(hass).state("ev1").config["soc_entity"] = None
+    entity.async_write_ha_state()
+    state = hass.states.get(CURRENT_SOC)
+    assert float(state.state) == 33
+    assert state.attributes["source"] == "manual"
 
 
 async def test_deadline_waiting_for_prices_then_planned(hass, start, freezer, prices):

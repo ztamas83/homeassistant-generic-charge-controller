@@ -207,7 +207,8 @@ export class CcDashboard extends LitElement {
       const v = parseFloat(this._state(id) ?? "");
       return Number.isFinite(v) ? v.toFixed(d) : "–";
     };
-    const soc = info?.soc != null ? info.soc.toFixed(0) : num(ents.current_soc);
+    const socNum = num(ents.current_soc);
+    const soc = socNum !== "–" ? socNum : info?.soc != null ? info.soc.toFixed(0) : "–";
     const target = info?.target_soc != null ? info.target_soc.toFixed(0) : num(ents.target_soc);
     const energy =
       info?.energy_needed_kwh != null ? info.energy_needed_kwh.toFixed(1) : num(ents.energy_needed, 1);
