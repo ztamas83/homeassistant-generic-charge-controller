@@ -186,7 +186,6 @@ export class ChargeControllerPanel extends LitElement {
                 .chargers=${chargers}
                 .entities=${this._entities}
                 .evs=${this._evs}
-                @charger-selected=${this._onChargerSelected}
                 @ev-selected=${this._onEvSelected}
                 @goto-tab=${(e: CustomEvent<{ tab: TabId }>) =>
                   (this._activeTab = e.detail.tab)}
