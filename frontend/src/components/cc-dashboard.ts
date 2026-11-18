@@ -202,6 +202,7 @@ export class CcDashboard extends LitElement {
     const charger = this.chargers.find((c) => c.id === ev.charger_id);
     return html`
       <ha-card class="ev ${status === "charging" ? "charging" : ""}">
+        ${info ? this._renderTimeline(info, ev.ev_id) : nothing}
         <div class="accent"></div>
         <div class="content" @click=${() => this._fire("ev-selected", { evId: ev.ev_id })}>
           <div class="ev-head">
@@ -226,7 +227,6 @@ export class CcDashboard extends LitElement {
           ${info?.plan?.insufficient_time
             ? html`<div class="warn">Not enough time to reach target</div>`
             : nothing}
-          ${info ? this._renderTimeline(info) : nothing}
           <div class="toggles">
             ${this._renderToggle("Smart charging", "mdi:brain", ents.smart_charging)}
             ${this._renderToggle("Charge now", "mdi:flash", ents.force_charge)}
@@ -236,15 +236,15 @@ export class CcDashboard extends LitElement {
     `;
   }
 
-  /** Mini timeline: price step line and planned blocks over the next WINDOW_H hours. */
-  private _renderTimeline(info: EvPlanInfo) {
+  /** Card background chart: price step area and planned bands over the next WINDOW_H hours. */
+  private _renderTimeline(info: EvPlanInfo, evId: string) {
     const blocks = info.plan?.blocks ?? [];
     const prices: PriceSlot[] = info.prices ?? [];
     if (blocks.length === 0 && prices.length === 0) return nothing;
     const t0 = Date.now();
     const t1 = t0 + WINDOW_H * HOUR_MS;
     const W = 1000;
-    const H = 90;
+    const H = 100;
     const x = (t: number) => ((Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0)) * W;
     const slots = prices
       .map((p) => ({ s: Date.parse(p.start), e: Date.parse(p.end), v: p.price }))
@@ -253,41 +253,52 @@ export class CcDashboard extends LitElement {
     const vals = slots.map((s) => s.v);
     const lo = Math.min(0, ...vals);
     const hi = Math.max(lo + 0.01, ...vals);
-    const y = (v: number) => 4 + (1 - (v - lo) / (hi - lo)) * (H - 8);
-    let d = "";
+    const y = (v: number) => 8 + (1 - (v - lo) / (hi - lo)) * (H - 8);
+    let line = "";
+    let area = "";
     let prevEnd = -1;
+    let runStart = 0;
+    let runEnd = 0;
+    const closeRun = () => {
+      if (prevEnd >= 0) area += `L${runEnd} ${H}L${runStart} ${H}Z`;
+    };
     for (const s of slots) {
-      d += s.s === prevEnd ? `L${x(s.s)} ${y(s.v)}` : `M${x(s.s)} ${y(s.v)}`;
-      d += `L${x(s.e)} ${y(s.v)}`;
+      const xs = x(s.s);
+      const xe = x(s.e);
+      if (s.s === prevEnd) {
+        line += `L${xs} ${y(s.v)}`;
+        area += `L${xs} ${y(s.v)}`;
+      } else {
+        closeRun();
+        line += `M${xs} ${y(s.v)}`;
+        area += `M${xs} ${H}L${xs} ${y(s.v)}`;
+        runStart = xs;
+      }
+      line += `L${xe} ${y(s.v)}`;
+      area += `L${xe} ${y(s.v)}`;
+      runEnd = xe;
       prevEnd = s.e;
     }
-    const hourTicks: number[] = [];
-    const first = new Date(t0);
-    first.setMinutes(0, 0, 0);
-    for (let t = first.getTime() + HOUR_MS; t < t1; t += HOUR_MS) {
-      if (new Date(t).getHours() % 6 === 0) hourTicks.push(t);
-    }
+    closeRun();
+    const gid = `pg-${evId}`;
     return html`
-      <div class="timeline">
-        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-          ${hourTicks.map(
-            (t) => svg`<line class="tick" x1=${x(t)} x2=${x(t)} y1="0" y2=${H}></line>`,
+      <svg class="bg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+        ${svg`<defs>
+          <linearGradient id=${gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="var(--secondary-text-color)" stop-opacity="0.22"></stop>
+            <stop offset="1" stop-color="var(--secondary-text-color)" stop-opacity="0"></stop>
+          </linearGradient>
+        </defs>`}
+        ${blocks
+          .filter((b) => Date.parse(b.end) > t0 && Date.parse(b.start) < t1)
+          .map(
+            (b) =>
+              svg`<rect class="band" x=${x(Date.parse(b.start))} y="0"
+                width=${Math.max(2, x(Date.parse(b.end)) - x(Date.parse(b.start)))} height=${H}></rect>`,
           )}
-          ${blocks
-            .filter((b) => Date.parse(b.end) > t0 && Date.parse(b.start) < t1)
-            .map(
-              (b) =>
-                svg`<rect class="block" x=${x(Date.parse(b.start))} y="0"
-                  width=${Math.max(2, x(Date.parse(b.end)) - x(Date.parse(b.start)))} height=${H}></rect>`,
-            )}
-          ${d ? svg`<path class="price" d=${d} fill="none"></path>` : nothing}
-        </svg>
-        <div class="axis">
-          <span>Now</span>
-          <span>${this._fmtHm(t0 + (WINDOW_H / 2) * HOUR_MS)}</span>
-          <span>+${WINDOW_H} h</span>
-        </div>
-      </div>
+        ${area ? svg`<path d=${area} fill="url(#${gid})"></path>` : nothing}
+        ${line ? svg`<path class="price" d=${line} fill="none"></path>` : nothing}
+      </svg>
     `;
   }
 
@@ -411,6 +422,8 @@ export class CcDashboard extends LitElement {
       background: var(--success-color, #4caf50);
     }
     .content {
+      position: relative;
+      z-index: 1;
       padding: 16px 16px 12px 20px;
       cursor: pointer;
     }
@@ -496,37 +509,24 @@ export class CcDashboard extends LitElement {
       border-color: var(--primary-color);
       color: var(--text-primary-color, #fff);
     }
-    .timeline {
-      margin-top: 10px;
-    }
-    .timeline svg {
-      display: block;
+    svg.bg {
+      position: absolute;
+      left: 0;
+      bottom: 0;
       width: 100%;
-      height: 90px;
-      background: var(--secondary-background-color);
-      border-radius: 4px;
+      height: 70%;
+      z-index: 0;
+      pointer-events: none;
     }
-    .timeline .block {
+    svg.bg .band {
       fill: var(--primary-color);
-      opacity: 0.35;
+      opacity: 0.16;
     }
-    .timeline .price {
+    svg.bg .price {
       stroke: var(--secondary-text-color);
-      stroke-width: 1.5;
-      opacity: 0.6;
+      stroke-width: 1.25;
+      stroke-opacity: 0.45;
       vector-effect: non-scaling-stroke;
-    }
-    .timeline .tick {
-      stroke: var(--divider-color);
-      stroke-width: 1;
-      vector-effect: non-scaling-stroke;
-    }
-    .axis {
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      color: var(--secondary-text-color);
-      margin-top: 2px;
     }
   `;
 }
