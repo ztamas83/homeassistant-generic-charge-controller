@@ -10,6 +10,7 @@ const LABELS: Record<string, string> = {
   charger_id: "Charger",
   battery_kwh: "Battery capacity",
   soc_entity: "Battery level sensor (optional)",
+  target_soc_entity: "Target battery level sensor (optional)",
   power_entity: "Charging power sensor",
   fallback_power_kw: "Fallback charging power",
   max_blocks: "Maximum number of charging blocks",
@@ -63,6 +64,10 @@ export class CcEvEditor extends LitElement {
       },
       { name: "soc_entity", selector: { entity: { filter: { domain: "sensor" } } } },
       {
+        name: "target_soc_entity",
+        selector: { entity: { filter: { domain: ["sensor", "number", "input_number"] } } },
+      },
+      {
         name: "power_entity",
         required: true,
         selector: { entity: { filter: { domain: "sensor", device_class: "power" } } },
@@ -98,6 +103,8 @@ export class CcEvEditor extends LitElement {
             .data=${this._data}
             .schema=${this._schema}
             .computeLabel=${(s: HaFormSchema) => LABELS[s.name] ?? s.name}
+            .computeHelper=${(s: HaFormSchema) =>
+              s.name === "target_soc_entity" ? "e.g. the car's charge limit" : ""}
             @value-changed=${(e: CustomEvent) => (this._data = e.detail.value)}
           ></ha-form>
           ${this._error ? html`<p class="error">${this._error}</p>` : nothing}
@@ -119,6 +126,7 @@ export class CcEvEditor extends LitElement {
       charger_id: d.charger_id,
       battery_kwh: d.battery_kwh,
       soc_entity: d.soc_entity || null,
+      target_soc_entity: d.target_soc_entity || null,
       power_entity: d.power_entity,
       fallback_power_kw: d.fallback_power_kw,
       max_blocks: d.max_blocks,

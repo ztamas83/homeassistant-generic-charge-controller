@@ -100,7 +100,8 @@ Setup:
 2. **EVs** tab: add an EV, link it to a configured charger, set battery size,
    target SOC, max blocks, optional ready-by, and a power sensor (for example
    the charger power sensor).
-3. Set the SOC manually or link a SOC entity.
+3. Set the SOC manually or link a SOC entity. Optionally link a target SOC sensor
+   (for example the car's charge limit); the target is then read-only and follows the sensor.
 
 Entities per EV: numbers `current_soc` and `target_soc`; switches
 `smart_charging` and `control_charger`; button `start_charging` ("Charge now"); sensors

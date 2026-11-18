@@ -40,6 +40,7 @@ from .const import (
     EV_POWER_ENTITY,
     EV_READY_BY,
     EV_SOC_ENTITY,
+    EV_TARGET_SOC_ENTITY,
     FUSE_MAX_A,
     HH_PRICE_AREA,
     HH_PRICE_CONFIG_ENTRY,
@@ -114,6 +115,7 @@ EV_CONFIG_SCHEMA = vol.Schema(
             vol.Coerce(float), vol.Range(min=EV_BATTERY_KWH_RANGE[0], max=EV_BATTERY_KWH_RANGE[1])
         ),
         vol.Optional(EV_SOC_ENTITY): vol.Any(None, cv.entity_id),
+        vol.Optional(EV_TARGET_SOC_ENTITY): vol.Any(None, cv.entity_id),
         vol.Required(EV_POWER_ENTITY): cv.entity_id,
         vol.Optional(EV_FALLBACK_POWER_KW, default=EV_DEFAULT_FALLBACK_POWER_KW): vol.All(
             vol.Coerce(float),

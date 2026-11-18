@@ -99,7 +99,7 @@ export class CcEvDetail extends LitElement {
   }
 
   private _socControl(key: "current_soc" | "target_soc", label: string) {
-    const sensor = key === "current_soc" ? this.ev.soc_entity : null;
+    const sensor = key === "current_soc" ? this.ev.soc_entity : this.ev.target_soc_entity;
     const value = this._numberValue(key) ?? (key === "current_soc" ? this._info?.soc : undefined);
     const sensorName = sensor
       ? (this.hass.states[sensor]?.attributes?.friendly_name ?? sensor)

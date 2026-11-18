@@ -109,6 +109,7 @@ export interface EvConfig {
   charger_id: string;
   battery_kwh: number;
   soc_entity: string | null;
+  target_soc_entity: string | null;
   power_entity: string;
   fallback_power_kw: number;
   max_blocks: number;

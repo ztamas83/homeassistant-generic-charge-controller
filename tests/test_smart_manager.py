@@ -290,6 +290,41 @@ async def test_manual_soc_kept_when_sensor_removed(hass, start):
     assert state.attributes["source"] == "manual"
 
 
+async def test_target_soc_from_sensor(hass, start):
+    hass.states.async_set("sensor.car_limit", "60")
+    await start(target_soc_entity="sensor.car_limit")
+    state = hass.states.get(TARGET_SOC)
+    assert float(state.state) == 60
+    assert state.attributes["source"] == "sensor"
+    assert state.attributes["source_entity"] == "sensor.car_limit"
+    assert float(hass.states.get("sensor.car_energy_needed").state) == pytest.approx(30)
+
+    hass.states.async_set("sensor.car_limit", "80")  # replans
+    await hass.async_block_till_done()
+    assert float(hass.states.get(TARGET_SOC).state) == 80
+    assert float(hass.states.get("sensor.car_energy_needed").state) == pytest.approx(40)
+
+    hass.states.async_set("sensor.car_limit", "150")  # clamped
+    await hass.async_block_till_done()
+    assert float(hass.states.get(TARGET_SOC).state) == 100
+
+    with pytest.raises(ServiceValidationError):
+        await set_number(hass, TARGET_SOC, 50)
+
+    manager(hass).state("ev1").target_soc = 70  # manual fallback
+    hass.states.async_set("sensor.car_limit", "unavailable")
+    await hass.async_block_till_done()
+    assert float(hass.states.get(TARGET_SOC).state) == 70
+    entity = hass.data["entity_components"]["number"].get_entity(TARGET_SOC)
+    assert entity.extra_restore_state_data.native_value == 70
+
+    manager(hass).state("ev1").config["target_soc_entity"] = None  # removed
+    entity.async_write_ha_state()
+    state = hass.states.get(TARGET_SOC)
+    assert float(state.state) == 70
+    assert state.attributes["source"] == "manual"
+
+
 async def test_deadline_waiting_for_prices_then_planned(hass, start, freezer, prices):
     # Ready by 01:00 tomorrow, only today's prices known
     await start(ready_by="01:00")
