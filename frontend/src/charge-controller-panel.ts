@@ -522,8 +522,8 @@ export class ChargeControllerPanel extends LitElement {
     if (path.startsWith("/charger/")) {
       this._selectedChargerId = decodeURIComponent(path.slice(9));
     } else if (path.startsWith("/ev/")) {
+      // Keep the active tab, so Back returns to where the detail was opened from
       this._selectedEvId = decodeURIComponent(path.slice(4));
-      this._activeTab = "evs";
     }
     this._routeApplied = true;
   }
