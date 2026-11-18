@@ -1,6 +1,7 @@
 import { LitElement, html, svg, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { HomeAssistant } from "../types";
+import { tickStep } from "../utils/chart";
 
 const RANGES = [
   { hours: 6, label: "6 h" },
@@ -53,14 +54,6 @@ function pointAt<T extends { t: number }>(points: T[], t: number): T | undefined
     }
   }
   return found;
-}
-
-/** Step size giving at most five ticks between 0 and max. */
-function tickStep(max: number): number {
-  for (const step of [1, 2, 5, 10, 20, 50]) {
-    if (max / step <= 5) return step;
-  }
-  return 100;
 }
 
 /**

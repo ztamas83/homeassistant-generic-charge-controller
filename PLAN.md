@@ -141,6 +141,23 @@ Changes:
 Verify:
 - Unit tests; HA test with a template `number` entity as a fake charger.
 
+### Step 8: Smart charging MVP
+Status: [x] implemented 2026-11-18, pending HA test
+
+Changes:
+- Virtual EV per charger (`smart/`): Nord Pool prices per household, cheapest-block planner with max blocks and optional ready-by, learning of charge power (own samples + recorder backfill, fallback until 6 samples), EV entities (sensors, numbers, binary sensor, control switch), EV panel components.
+- Manifest `after_dependencies` include `nordpool` and `recorder`.
+
+Decisions:
+- Prices via the core `nordpool` integration, configured per household (entry + area).
+- Control switch off = dry run; pausing works only while the charger's Load balancing active switch is on.
+- Ready-by beyond known prices: wait for prices instead of planning on partial data.
+- EV `model` setting selects the learning model (only `average` exists) and is passed to the learning manager.
+- Manual SOC defaults to 0 %; a completed plan keeps the charger paused until SOC/target/config changes; no efficiency or taper; cost without currency or grid fees.
+
+Verify:
+- Unit tests; HA test with Nord Pool and a real charger.
+
 ### Later
 - Multiple chargers per household with fair sharing
 - Solar charging

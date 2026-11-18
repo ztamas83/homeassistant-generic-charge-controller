@@ -32,6 +32,7 @@ from .const import (
     MODE_FAILSAFE,
     MODE_IDLE,
     MODE_LIMITED,
+    MODE_SCHEDULED_PAUSE,
     OVERLOAD_DURATION_S,
     OVERLOAD_FACTOR,
     PHASES,
@@ -245,6 +246,15 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         }
         reasons = list(result.reasons)
 
+        # Smart charging can only pause (lower limits), never raise what load
+        # balancing allows. None means no opinion.
+        smart = self.hass.data[DOMAIN].get("smart")
+        if smart is not None and smart.charging_allowed(charger_id) is False:
+            targets_by_charger_phase = {phase: 0 for phase in targets_by_charger_phase}
+            if mode != MODE_FAILSAFE:
+                mode = MODE_SCHEDULED_PAUSE
+            reasons.append("smart_charging")
+
         overload, overload_pending_s = self._overload_detectors.setdefault(
             config[CH_HOUSEHOLD], OverloadDetector()
         ).update(household_loads, float(household[HH_FUSE]), now)
@@ -279,6 +289,9 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
 
         for reason in reasons:
             _LOGGER.debug("Charger %s: %s", charger_id, reason)
+
+        if smart is not None:
+            smart.feed_learning(charger_id, now, mode, charger.is_connected())
 
         sender = self._senders.get(charger_id)
         return {

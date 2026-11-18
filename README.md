@@ -78,6 +78,51 @@ sensor (`idle`, `charging`, `limited`, `failsafe`, with the reasons and the
 last sent limits as attributes), and the **Load balancing active** switch.
 Entities per household: load per phase.
 
+## Smart charging (beta)
+
+Plans when an EV charges to use the cheapest hours. Each EV is a virtual device
+linked to a configured charger.
+
+- Prices come from the core Nord Pool integration, per household (config entry
+  and price area).
+- The plan uses at most the configured number of charging blocks (hour
+  blocks), picking the cheapest ones. An optional ready-by time sets the
+  deadline. If it is beyond the known prices, the EV waits for the next price
+  publication.
+- Outside the planned blocks the charger is paused.
+
+Setup:
+
+1. **Households**: pick the Nord Pool config entry and the price area.
+2. **EVs** tab: add an EV, link it to a configured charger, set battery size,
+   target SOC, max blocks, optional ready-by, and a power sensor (for example
+   the charger power sensor).
+3. Set the SOC manually or link a SOC entity.
+
+Entities per EV: numbers `current_soc` and `target_soc`; switches
+`smart_charging` and `control_charger`; sensors `status`, `energy_needed`,
+`estimated_power`, `charge_duration`, `next_charge_start`, `planned_cost`;
+binary sensor `charge_now`. With **control_charger** off the plan is only calculated (dry
+run). With it on, the charger is paused outside planned blocks. Pausing works
+only while the charger's **Load balancing active** switch is on.
+
+Learning: the charging power is estimated from the EV's own power samples
+while it charges unthrottled, seeded from recorder history. Until 6 samples
+exist, the fallback power setting is used.
+
+Known limitations:
+
+- Manual SOC defaults to 0 % until it is set.
+- After a plan completes (or the target is reached during a plan) the charger
+  stays paused until the car is unplugged. Unplugging clears the plan and
+  releases the charger; plugging in plans again. If the car is already at
+  target when plugged in, the charger is not paused.
+- Without a SOC sensor the SOC is estimated from the energy delivered (power
+  sensor), capped at the target. Charging losses are not modelled, so it may
+  overestimate. After driving, set the SOC manually or use a SOC sensor.
+- No charging efficiency or taper is modelled.
+- Cost is shown without currency and grid fees.
+
 ## Development
 
 Requirements: Python 3.14, Node.js.

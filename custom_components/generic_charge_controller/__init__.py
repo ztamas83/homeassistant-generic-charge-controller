@@ -17,8 +17,11 @@ from .const import DOMAIN
 from .devices import (
     async_remove_stale,
     charger_device_identifier,
+    ev_device_identifier,
     household_device_identifier,
 )
+from .smart.learning.manager import LearningManager
+from .smart.manager import SmartChargingManager
 from .store import ChargeControllerStore
 from .unique_ids import expected_unique_ids
 from .coordinator import ChargeControllerCoordinator
@@ -29,7 +32,12 @@ from homeassistant.components.frontend import (
     async_remove_panel,
 )
 
-PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.NUMBER,
+    Platform.BINARY_SENSOR,
+]
 PANEL_URL_PATH = "charge-controller"
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -70,6 +78,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator"
     ] = coordinator  # For easy access in websocket handlers
 
+    # Smart charging: learning first, the manager reads estimates from it
+    learning = LearningManager(hass)
+    await learning.async_load()
+    entry.async_on_unload(learning.async_start())
+    smart = SmartChargingManager(
+        hass, hass.data[DOMAIN]["store"], learning, coordinator
+    )
+    hass.data[DOMAIN]["learning"] = learning
+    hass.data[DOMAIN]["smart"] = smart
+
     await _async_register_panel(hass)
     _LOGGER.info(
         "Forwarding entry setups for entry %s to platforms: %s",
@@ -79,16 +97,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     store = hass.data[DOMAIN]["store"]
-    households, chargers = store.get_households(), store.get_chargers()
+    households, chargers, evs = (
+        store.get_households(),
+        store.get_chargers(),
+        store.get_evs(),
+    )
     async_remove_stale(
         hass,
         entry,
-        expected_unique_ids(households, chargers),
+        expected_unique_ids(households, chargers, evs),
         {
             *(household_device_identifier(h) for h in households),
             *(charger_device_identifier(c) for c in chargers),
+            *(ev_device_identifier(e) for e in evs),
         },
     )
+
+    # Entities are in place (state restored): make the first plan and start the timers
+    await smart.async_start(entry)
 
     _LOGGER.info(
         "Setup complete for generic_charge_controller entry: %s", entry.entry_id
@@ -105,6 +131,10 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if unload_ok:
         hass.data[DOMAIN].pop(config_entry.entry_id)
         hass.data[DOMAIN].pop("coordinator", None)
+        hass.data[DOMAIN].pop("smart", None)
+        learning = hass.data[DOMAIN].pop("learning", None)
+        if learning is not None:
+            await learning.async_stop()
 
     # The panel stays registered across reloads; it is removed with the entry
     return unload_ok

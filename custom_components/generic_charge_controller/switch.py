@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import ChargeControllerCoordinator
 from .devices import charger_device_info
+from .ev_entity import EvEntity
+from .smart.manager import SmartChargingManager
 from .store import ChargeControllerStore
 from .unique_ids import CONTROL_SWITCH_KEY, charger_unique_id
 
@@ -60,6 +62,59 @@ class ChargerControlSwitch(
         self.async_write_ha_state()
 
 
+class _EvSwitch(EvEntity, RestoreEntity, SwitchEntity):
+    """Restored on/off switch of an EV, on by default."""
+
+    def _restore(self, value: bool) -> None:
+        raise NotImplementedError
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state in (STATE_ON, STATE_OFF):
+            self._restore(last_state.state == STATE_ON)
+
+
+class SmartChargingSwitch(_EvSwitch):
+    """Enables planning of the charging into the cheapest hours."""
+
+    _key = "smart_charging"
+    _attr_icon = "mdi:calendar-clock"
+
+    def _restore(self, value: bool) -> None:
+        self._manager.restore_smart_enabled(self._ev_id, value)
+
+    @property
+    def is_on(self) -> bool:
+        return self._state.smart_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._manager.async_set_smart_enabled(self._ev_id, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._manager.async_set_smart_enabled(self._ev_id, False)
+
+
+class ControlChargerSwitch(_EvSwitch):
+    """When off the plan is only calculated (dry run), the charger is not paused."""
+
+    _key = "control_charger"
+    _attr_icon = "mdi:ev-station"
+
+    def _restore(self, value: bool) -> None:
+        self._manager.restore_control_enabled(self._ev_id, value)
+
+    @property
+    def is_on(self) -> bool:
+        return self._state.control_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._manager.async_set_control_enabled(self._ev_id, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._manager.async_set_control_enabled(self._ev_id, False)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -70,4 +125,11 @@ async def async_setup_entry(
     async_add_entities(
         ChargerControlSwitch(coordinator, charger_id, charger_device_info(hass, charger_id))
         for charger_id in store.get_chargers()
+    )
+
+    smart: SmartChargingManager = hass.data[DOMAIN]["smart"]
+    async_add_entities(
+        entity
+        for ev_id in smart.ev_ids()
+        for entity in (SmartChargingSwitch(smart, ev_id), ControlChargerSwitch(smart, ev_id))
     )
