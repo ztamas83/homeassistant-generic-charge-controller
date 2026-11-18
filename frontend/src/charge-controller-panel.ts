@@ -21,8 +21,9 @@ import "./components/cc-ev-editor";
 import "./components/cc-ev-detail";
 import "./components/cc-settings";
 import "./components/cc-charger-status";
+import "./components/cc-dashboard";
 
-type TabId = "households" | "chargers" | "evs" | "settings";
+type TabId = "dashboard" | "households" | "chargers" | "evs" | "settings";
 
 const WS = "generic_charge_controller";
 
@@ -35,7 +36,7 @@ export class ChargeControllerPanel extends LitElement {
 
   @state() private _elementsLoaded = false;
   @state() private _selectedChargerId: string | null = null;
-  @state() private _activeTab: TabId = "households";
+  @state() private _activeTab: TabId = "dashboard";
   @state() private _routeApplied = false;
   @state() private _households: Record<string, HouseholdConfig> = {};
   @state() private _chargerConfigs: Record<string, ChargerConfig> = {};
@@ -134,6 +135,12 @@ export class ChargeControllerPanel extends LitElement {
         ? html`
             <div class="tabs">
               <div
+                class="tab ${this._activeTab === "dashboard" ? "active" : ""}"
+                @click=${() => (this._activeTab = "dashboard")}
+              >
+                Dashboard
+              </div>
+              <div
                 class="tab ${this._activeTab === "households" ? "active" : ""}"
                 @click=${() => (this._activeTab = "households")}
               >
@@ -171,6 +178,19 @@ export class ChargeControllerPanel extends LitElement {
           ? this._renderEvDetail(selectedEv)
           : inDetail
             ? this._renderDetail(selectedCharger)
+            : this._activeTab === "dashboard"
+            ? html`<cc-dashboard
+                .hass=${this.hass}
+                .households=${this._households}
+                .chargerConfigs=${this._chargerConfigs}
+                .chargers=${chargers}
+                .entities=${this._entities}
+                .evs=${this._evs}
+                @charger-selected=${this._onChargerSelected}
+                @ev-selected=${this._onEvSelected}
+                @goto-tab=${(e: CustomEvent<{ tab: TabId }>) =>
+                  (this._activeTab = e.detail.tab)}
+              ></cc-dashboard>`
             : this._activeTab === "households"
             ? this._renderHouseholds()
             : this._activeTab === "chargers"
