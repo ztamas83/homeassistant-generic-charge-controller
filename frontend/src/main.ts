@@ -5,3 +5,5 @@
  * charge-controller-panel.js and served by Home Assistant.
  */
 import "./charge-controller-panel";
+
+console.info(`Charge Controller panel ${__BUILD_ID__}`);

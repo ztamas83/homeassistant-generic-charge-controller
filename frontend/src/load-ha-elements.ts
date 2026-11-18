@@ -8,7 +8,7 @@
  * Technique used by alarmo, scheduler-card, mushroom, and others.
  */
 export const loadHaElements = async (): Promise<void> => {
-  if (customElements.get("ha-entity-picker") && customElements.get("ha-form")) return;
+  if (customElements.get("ha-entity-picker")) return;
 
   // Step 1: Load base HA components via partial-panel-resolver.
   // Guard on ha-selector (not ha-card) because ha-card can be defined by
@@ -51,7 +51,7 @@ export const loadHaElements = async (): Promise<void> => {
       await Promise.race([
         customElements.whenDefined("ha-selector"),
         new Promise<void>((_, rej) =>
-          setTimeout(() => rej(new Error("timeout")), 10_000)
+          setTimeout(() => rej(new Error("timeout")), 10_000),
         ),
       ]);
       const hass = (document.querySelector("home-assistant") as any)?.hass;
