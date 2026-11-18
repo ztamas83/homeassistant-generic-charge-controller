@@ -30,6 +30,7 @@ from ..const import (
     EV_POWER_ENTITY,
     EV_READY_BY,
     EV_SOC_ENTITY,
+    EV_TARGET_SOC_ENTITY,
     HH_PRICE_AREA,
     HH_PRICE_CONFIG_ENTRY,
     MODE_CHARGING,
@@ -154,23 +155,21 @@ class SmartChargingManager:
                 self.hass, self._async_tick, minute=[0, 15, 30, 45], second=5
             )
         )
-        soc_entities = {
-            st.config[EV_SOC_ENTITY]: ev_id
-            for ev_id, st in self._states.items()
-            if st.config.get(EV_SOC_ENTITY)
-        }
-        if soc_entities:
+        watched: dict[str, list[str]] = {}
+        for ev_id, st in self._states.items():
+            for key in (EV_SOC_ENTITY, EV_TARGET_SOC_ENTITY):
+                if entity_id := st.config.get(key):
+                    watched.setdefault(entity_id, []).append(ev_id)
+        if watched:
 
             @callback
             def _soc_changed(event: Event[EventStateChangedData]) -> None:
-                ev_id = soc_entities.get(event.data["entity_id"])
-                if ev_id is None:
-                    return
-                self._mark_dirty(self._states[ev_id])
+                for ev_id in watched.get(event.data["entity_id"], []):
+                    self._mark_dirty(self._states[ev_id])
                 self.hass.async_create_task(self.async_update())
 
             entry.async_on_unload(
-                async_track_state_change_event(self.hass, list(soc_entities), _soc_changed)
+                async_track_state_change_event(self.hass, list(watched), _soc_changed)
             )
 
         for ev_id, st in self._states.items():
@@ -332,6 +331,21 @@ class SmartChargingManager:
         st = self._states.get(ev_id)
         return self._effective_soc(st) if st else 0.0
 
+    def effective_target_soc(self, ev_id: str) -> float:
+        st = self._states.get(ev_id)
+        return self._effective_target(st) if st else 0.0
+
+    def _effective_target(self, st: EvState) -> float:
+        entity_id = st.config.get(EV_TARGET_SOC_ENTITY)
+        if entity_id and (state := self.hass.states.get(entity_id)) is not None:
+            try:
+                value = float(state.state)
+            except ValueError:
+                value = None
+            if value is not None and value == value:
+                return min(100.0, max(0.0, value))
+        return st.target_soc
+
     def _effective_soc(self, st: EvState) -> float:
         entity_id = st.config.get(EV_SOC_ENTITY)
         if entity_id and (state := self.hass.states.get(entity_id)) is not None:
@@ -356,7 +370,7 @@ class SmartChargingManager:
         raw = repr(
             (
                 round(soc, 3),
-                round(st.target_soc, 3),
+                round(self._effective_target(st), 3),
                 cfg.get(EV_BATTERY_KWH),
                 cfg.get(EV_READY_BY),
                 cfg.get(EV_MAX_BLOCKS, EV_DEFAULT_MAX_BLOCKS),
@@ -448,7 +462,7 @@ class SmartChargingManager:
 
                 battery = float(st.config.get(EV_BATTERY_KWH) or 0)
                 st.soc = self._effective_soc(st)
-                st.energy_needed_kwh = max(0.0, battery * (st.target_soc - st.soc) / 100)
+                st.energy_needed_kwh = max(0.0, battery * (self._effective_target(st) - st.soc) / 100)
                 st.estimate = self._learning.estimate(
                     ev_id,
                     st.energy_needed_kwh,
@@ -582,7 +596,7 @@ class SmartChargingManager:
         ):
             return
         dt = (now - last).total_seconds()
-        cap = min(100.0, st.target_soc)
+        cap = min(100.0, self._effective_target(st))
         if not 0 < dt <= MAX_TICK_GAP_S or st.manual_soc >= cap:
             return
         st.manual_soc = min(cap, st.manual_soc + power_kw * dt / 3600 / battery * 100)
@@ -621,7 +635,7 @@ class SmartChargingManager:
         return {
             "status": st.status,
             "soc": st.soc,
-            "target_soc": st.target_soc,
+            "target_soc": self._effective_target(st),
             "energy_needed_kwh": st.energy_needed_kwh,
             "estimate": {
                 "power_kw": estimate.power_kw,

@@ -340,6 +340,23 @@ async def test_ev_save_get_delete(hass, ws, easee_device):
     assert (await ws("evs/get"))["result"] == {}
 
 
+async def test_ev_target_soc_entity(hass, ws, easee_device):
+    """target_soc_entity accepts an entity id or None and rejects invalid ids."""
+    charger_id = await _create_charger(ws, easee_device)
+    config = {**EV_CONFIG, "charger_id": charger_id, "target_soc_entity": "sensor.car_limit"}
+    result = await ws("evs/save", config=config)
+    assert result["success"], result
+    ev_id = result["result"]["ev_id"]
+    assert (await ws("evs/get"))["result"][ev_id]["target_soc_entity"] == "sensor.car_limit"
+
+    result = await ws("evs/save", ev_id=ev_id, config={**config, "target_soc_entity": None})
+    assert result["success"], result
+    assert (await ws("evs/get"))["result"][ev_id]["target_soc_entity"] is None
+
+    result = await ws("evs/save", ev_id=ev_id, config={**config, "target_soc_entity": "bad"})
+    assert not result["success"]
+
+
 async def test_ev_save_unknown_charger(hass, ws):
     """An EV must reference an existing charger."""
     result = await ws("evs/save", config={**EV_CONFIG, "charger_id": "nope"})
