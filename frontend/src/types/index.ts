@@ -93,7 +93,8 @@ export type EvEntityKey =
   | "charge_duration"
   | "next_charge_start"
   | "planned_cost"
-  | "charge_now";
+  | "charge_now"
+  | "force_charge";
 
 export interface ControllerEntities {
   households: Record<string, Partial<Record<HouseholdPhase, string>>>;
@@ -163,6 +164,7 @@ export interface EvPlanInfo {
   deadline: string | null;
   control_enabled: boolean;
   smart_enabled: boolean;
+  force_charge?: boolean;
 }
 
 export const EV_STATUS_TEXT: Record<string, string> = {
