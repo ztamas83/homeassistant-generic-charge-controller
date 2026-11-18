@@ -74,15 +74,18 @@ HOUSEHOLD_CONFIG = {
 PHASE_MAP = {"L1": "P2", "L2": "P3", "L3": "P1"}
 
 
-def storage_data(households: dict | None = None, chargers: dict | None = None) -> dict:
+def storage_data(
+    households: dict | None = None, chargers: dict | None = None, evs: dict | None = None
+) -> dict:
     """Return HA storage content for the integration store."""
     return {
-        "version": 2,
+        "version": 3,
         "minor_version": 1,
         "key": DOMAIN,
         "data": {
             "households": households or {},
             "chargers": chargers or {},
+            "evs": evs or {},
             "settings": {},
         },
     }

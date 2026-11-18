@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .const import CHARGER_PHASES, DOMAIN, PHASES
+from .const import CHARGER_PHASES, DOMAIN, EV_ENTITY_KEYS, PHASES
 
 # Keys of the per-charger values in the coordinator data, one sensor each
 CHARGER_DATA_KEYS = [
@@ -22,12 +22,16 @@ def charger_unique_id(charger_id: str, data_key: str) -> str:
     return f"{DOMAIN}_{charger_id}_{data_key.lower()}"
 
 
+def ev_unique_id(ev_id: str, key: str) -> str:
+    """Unique id of an EV entity (key from EV_ENTITY_KEYS)."""
+    return f"{DOMAIN}_ev_{ev_id}_{key}"
+
 
 # Key of the per-charger switch that enables sending limits to the charger
 CONTROL_SWITCH_KEY = "load_balancing_active"
 
 
-def expected_unique_ids(household_ids, charger_ids) -> set[str]:
+def expected_unique_ids(household_ids, charger_ids, ev_ids=()) -> set[str]:
     """Unique ids of all entities that should exist for the stored configuration."""
     return {
         *(household_load_unique_id(h, p) for h in household_ids for p in PHASES),
@@ -36,4 +40,5 @@ def expected_unique_ids(household_ids, charger_ids) -> set[str]:
             for c in charger_ids
             for key in (*CHARGER_DATA_KEYS, CONTROL_SWITCH_KEY)
         ),
+        *(ev_unique_id(e, key) for e in ev_ids for key in EV_ENTITY_KEYS),
     }

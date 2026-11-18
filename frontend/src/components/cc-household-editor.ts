@@ -11,7 +11,7 @@ const phaseSensor = (name: string): HaFormSchema => ({
   selector: { entity: { filter: { domain: "sensor", device_class: "current" } } },
 });
 
-const SCHEMA: HaFormSchema[] = [
+const SCHEMA_MAIN: HaFormSchema[] = [
   { name: "name", required: true, selector: { text: {} } },
   {
     name: "fuse_a",
@@ -23,12 +23,27 @@ const SCHEMA: HaFormSchema[] = [
   phaseSensor("l3_entity"),
 ];
 
+const AREAS = [
+  "EE", "LT", "LV", "AT", "BE", "FR", "GER", "NL", "PL", "DK1", "DK2", "FI",
+  "NO1", "NO2", "NO3", "NO4", "NO5", "SE1", "SE2", "SE3", "SE4", "BG", "TEL", "SYS",
+];
+
+const SCHEMA_PRICE: HaFormSchema[] = [
+  { name: "price_config_entry", selector: { config_entry: { integration: "nordpool" } } },
+  {
+    name: "price_area",
+    selector: { select: { mode: "dropdown", options: AREAS.map((a) => ({ value: a, label: a })) } },
+  },
+];
+
 const LABELS: Record<string, string> = {
   name: "Name",
   fuse_a: "Main fuse rating",
   l1_entity: "Current sensor L1",
   l2_entity: "Current sensor L2",
   l3_entity: "Current sensor L3",
+  price_config_entry: "Nord Pool integration (electricity prices)",
+  price_area: "Price area",
 };
 
 @customElement("cc-household-editor")
@@ -64,7 +79,7 @@ export class CcHouseholdEditor extends LitElement {
           <ha-form
             .hass=${this.hass}
             .data=${this._data}
-            .schema=${SCHEMA}
+            .schema=${[...SCHEMA_MAIN, ...SCHEMA_PRICE]}
             .computeLabel=${(s: HaFormSchema) => LABELS[s.name] ?? s.name}
             @value-changed=${(e: CustomEvent) => (this._data = e.detail.value)}
           ></ha-form>
@@ -85,7 +100,11 @@ export class CcHouseholdEditor extends LitElement {
       await this.hass.callWS({
         type: "generic_charge_controller/households/save",
         ...(this.household ? { household_id: this.household.household_id } : {}),
-        config: this._data,
+        config: {
+          ...this._data,
+          price_config_entry: this._data.price_config_entry || null,
+          price_area: this._data.price_area || null,
+        },
       });
       this.dispatchEvent(new CustomEvent("household-saved", { bubbles: true, composed: true }));
     } catch (err: any) {

@@ -9,5 +9,47 @@
     "abort": {
       "single_instance_allowed": "The charge controller is already set up."
     }
+  },
+  "entity": {
+    "sensor": {
+      "mode": {
+        "state": {
+          "idle": "Idle",
+          "charging": "Charging",
+          "limited": "Limited",
+          "failsafe": "Failsafe",
+          "scheduled_pause": "Scheduled pause"
+        }
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "disabled": "Disabled",
+          "no_charging_needed": "No charging needed",
+          "no_price_source": "No price source",
+          "waiting_for_prices": "Waiting for prices",
+          "planned": "Planned",
+          "charging": "Charging",
+          "insufficient_time": "Insufficient time",
+          "completed": "Completed"
+        }
+      },
+      "energy_needed": { "name": "Energy needed" },
+      "estimated_power": { "name": "Estimated power" },
+      "charge_duration": { "name": "Charge duration" },
+      "next_charge_start": { "name": "Next charge start" },
+      "planned_cost": { "name": "Planned cost" }
+    },
+    "number": {
+      "current_soc": { "name": "Current state of charge" },
+      "target_soc": { "name": "Target state of charge" }
+    },
+    "switch": {
+      "smart_charging": { "name": "Smart charging" },
+      "control_charger": { "name": "Control charger" }
+    },
+    "binary_sensor": {
+      "charge_now": { "name": "Charge now" }
+    }
   }
 }

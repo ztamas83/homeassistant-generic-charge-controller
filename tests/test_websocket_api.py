@@ -296,3 +296,123 @@ async def test_settings_change_calculation(hass, ws, easee_device):
     await hass.async_block_till_done()
 
     assert float(hass.states.get(target).state) == 16
+
+
+EV_CONFIG = {
+    "name": "Car",
+    "battery_kwh": 60,
+    "power_entity": "sensor.car_power",
+}
+
+
+async def _create_charger(ws, easee_device) -> str:
+    household_id = await _create_household(ws)
+    result = await ws(
+        "chargers/save",
+        charger_id=easee_device.id,
+        config={"type": "easee", "household_id": household_id, "phase_map": PHASE_MAP},
+    )
+    assert result["success"], result
+    return easee_device.id
+
+
+async def test_ev_save_get_delete(hass, ws, easee_device):
+    """EVs can be created, updated, listed and deleted with defaults applied."""
+    charger_id = await _create_charger(ws, easee_device)
+    config = {**EV_CONFIG, "charger_id": charger_id, "ready_by": "07:30"}
+
+    result = await ws("evs/save", config=config)
+    assert result["success"], result
+    ev_id = result["result"]["ev_id"]
+
+    evs = (await ws("evs/get"))["result"]
+    assert evs[ev_id]["ev_id"] == ev_id
+    assert evs[ev_id]["fallback_power_kw"] == 11.0
+    assert evs[ev_id]["max_blocks"] == 2
+    assert evs[ev_id]["model"] == "average"
+    assert evs[ev_id]["ready_by"] == "07:30"
+
+    result = await ws("evs/save", ev_id=ev_id, config={**config, "max_blocks": 4})
+    assert result["result"] == {"ev_id": ev_id}
+    assert (await ws("evs/get"))["result"][ev_id]["max_blocks"] == 4
+
+    assert (await ws("evs/delete", ev_id=ev_id))["success"]
+    assert (await ws("evs/get"))["result"] == {}
+
+
+async def test_ev_save_unknown_charger(hass, ws):
+    """An EV must reference an existing charger."""
+    result = await ws("evs/save", config={**EV_CONFIG, "charger_id": "nope"})
+
+    assert result["error"]["code"] == "not_found"
+
+
+async def test_ev_update_unknown_ev(hass, ws, easee_device):
+    """Updating an unknown EV fails."""
+    charger_id = await _create_charger(ws, easee_device)
+    result = await ws("evs/save", ev_id="nope", config={**EV_CONFIG, "charger_id": charger_id})
+
+    assert result["error"]["code"] == "not_found"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"ready_by": "24:00"},
+        {"ready_by": "7:30"},
+        {"ready_by": "12:60"},
+        {"battery_kwh": 0},
+        {"battery_kwh": 301},
+        {"fallback_power_kw": 0.1},
+        {"fallback_power_kw": 51},
+        {"max_blocks": 0},
+        {"max_blocks": 7},
+        {"model": "other"},
+    ],
+)
+async def test_ev_invalid_config(hass, ws, easee_device, changes):
+    """Out of range or malformed EV fields are rejected."""
+    charger_id = await _create_charger(ws, easee_device)
+    result = await ws("evs/save", config={**EV_CONFIG, "charger_id": charger_id, **changes})
+
+    assert result["error"]["code"] == "invalid_format"
+
+
+async def test_household_price_fields(hass, ws):
+    """Household price fields round trip and may be omitted or None."""
+    config = {**HOUSEHOLD_CONFIG, "price_config_entry": "abc", "price_area": "SE3"}
+    result = await ws("households/save", config=config)
+    assert result["result"]["price_area"] == "SE3"
+    assert result["result"]["price_config_entry"] == "abc"
+
+    result = await ws(
+        "households/save",
+        household_id=result["result"]["household_id"],
+        config={**HOUSEHOLD_CONFIG, "price_config_entry": None, "price_area": None},
+    )
+    assert result["result"]["price_area"] is None
+
+    result = await ws("households/save", config={**HOUSEHOLD_CONFIG, "price_area": "XX"})
+    assert result["error"]["code"] == "invalid_format"
+
+
+async def test_ev_plan_and_learning_not_loaded(hass, ws):
+    """Plan and learning reset report not_loaded without the smart components."""
+    hass.data[DOMAIN].pop("smart", None)
+    hass.data[DOMAIN].pop("learning", None)
+    assert (await ws("evs/plan", ev_id="x"))["error"]["code"] == "not_loaded"
+    assert (await ws("evs/learning/reset", ev_id="x"))["error"]["code"] == "not_loaded"
+
+
+async def test_entities_includes_evs(hass, ws, easee_device):
+    """EV entities found in the registry are listed per EV."""
+    charger_id = await _create_charger(ws, easee_device)
+    ev_id = (await ws("evs/save", config={**EV_CONFIG, "charger_id": charger_id}))["result"]["ev_id"]
+    er.async_get(hass).async_get_or_create(
+        "sensor", DOMAIN, f"{DOMAIN}_ev_{ev_id}_status", suggested_object_id="car_status"
+    )
+
+    result = (await ws("entities"))["result"]
+
+    assert result["evs"][ev_id]["status"] == "sensor.car_status"
+    assert result["evs"][ev_id]["current_soc"].startswith("number.")

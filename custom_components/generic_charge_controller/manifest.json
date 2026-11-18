@@ -2,7 +2,12 @@
   "domain": "generic_charge_controller",
   "name": "Generic Charge Controller",
   "after_dependencies": [
-    "easee"
+    "easee",
+    "nordpool",
+    "recorder"
+  ],
+  "categories": [
+    "vehicles_transport.cars_evs"
   ],
   "codeowners": [
     "@ztamas83"

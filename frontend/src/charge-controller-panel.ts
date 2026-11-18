@@ -8,6 +8,7 @@ import {
   ControllerEntities,
   ControllerSettings,
   DiscoveredCharger,
+  EvConfig,
   HouseholdConfig,
 } from "./types";
 import "./components/cc-charger-card";
@@ -15,10 +16,13 @@ import "./components/cc-load-balancer-settings";
 import "./components/cc-household-card";
 import "./components/cc-household-editor";
 import "./components/cc-charger-history";
+import "./components/cc-ev-card";
+import "./components/cc-ev-editor";
+import "./components/cc-ev-detail";
 import "./components/cc-settings";
 import "./components/cc-charger-status";
 
-type TabId = "households" | "chargers" | "settings";
+type TabId = "households" | "chargers" | "evs" | "settings";
 
 const WS = "generic_charge_controller";
 
@@ -43,6 +47,10 @@ export class ChargeControllerPanel extends LitElement {
   @state() private _settings: ControllerSettings | null = null;
   /** Household being edited: an id, "new", or null when not editing. */
   @state() private _editingHousehold: string | null = null;
+  @state() private _evs: Record<string, EvConfig> = {};
+  /** EV being edited: an id, "new", or null when not editing. */
+  @state() private _editingEv: string | null = null;
+  @state() private _selectedEvId: string | null = null;
   @state() private _error = "";
 
   protected firstUpdated() {
@@ -57,14 +65,17 @@ export class ChargeControllerPanel extends LitElement {
 
   private async _loadData() {
     try {
-      const [households, chargers, discovered, entities, settings] =
+      const [households, chargers, discovered, entities, settings, evs] =
         await Promise.all([
           this.hass.callWS({ type: `${WS}/households/get` }),
           this.hass.callWS({ type: `${WS}/chargers/get` }),
           this.hass.callWS({ type: `${WS}/chargers/discover` }),
           this.hass.callWS({ type: `${WS}/entities` }),
           this.hass.callWS({ type: `${WS}/settings/get` }),
+          // Older backends have no EV support
+          this.hass.callWS({ type: `${WS}/evs/get` }).catch(() => ({})),
         ]);
+      this._evs = evs ?? {};
       this._settings = settings;
       this._households = households;
       this._chargerConfigs = chargers;
@@ -97,7 +108,8 @@ export class ChargeControllerPanel extends LitElement {
     const chargers = this._discoveredChargers.map((c) =>
       getEaseeChargerData(this.hass, c),
     );
-    const inDetail = !!this._selectedChargerId;
+    const selectedEv = this._selectedEvId ? (this._evs[this._selectedEvId] ?? null) : null;
+    const inDetail = !!this._selectedChargerId || !!this._selectedEvId;
     const selectedCharger = inDetail
       ? (chargers.find((c) => c.id === this._selectedChargerId) ?? null)
       : null;
@@ -111,7 +123,9 @@ export class ChargeControllerPanel extends LitElement {
           : nothing}
         <div class="title">
           ${inDetail
-            ? (selectedCharger?.name ?? "Charger Details")
+            ? this._selectedEvId
+              ? (selectedEv?.name ?? "EV Details")
+              : (selectedCharger?.name ?? "Charger Details")
             : "Charge Controller"}
         </div>
         <div class="build-id">${__BUILD_ID__}</div>
@@ -132,6 +146,12 @@ export class ChargeControllerPanel extends LitElement {
                 Chargers
               </div>
               <div
+                class="tab ${this._activeTab === "evs" ? "active" : ""}"
+                @click=${() => (this._activeTab = "evs")}
+              >
+                EVs
+              </div>
+              <div
                 class="tab ${this._activeTab === "settings" ? "active" : ""}"
                 @click=${() => (this._activeTab = "settings")}
               >
@@ -147,13 +167,17 @@ export class ChargeControllerPanel extends LitElement {
               ${this._error}
             </div>`
           : nothing}
-        ${inDetail
-          ? this._renderDetail(selectedCharger)
-          : this._activeTab === "households"
+        ${this._selectedEvId
+          ? this._renderEvDetail(selectedEv)
+          : inDetail
+            ? this._renderDetail(selectedCharger)
+            : this._activeTab === "households"
             ? this._renderHouseholds()
             : this._activeTab === "chargers"
               ? this._renderChargers(chargers)
-              : html`<div class="detail-view">
+              : this._activeTab === "evs"
+                ? this._renderEvs(chargers)
+                : html`<div class="detail-view">
                   <cc-settings .hass=${this.hass}></cc-settings>
                 </div>`}
       </div>
@@ -291,6 +315,66 @@ export class ChargeControllerPanel extends LitElement {
     `;
   }
 
+  private _renderEvs(chargers: ChargerData[]) {
+    if (this._editingEv !== null) {
+      const names: Record<string, string> = {};
+      for (const c of chargers) names[c.id] = c.name;
+      return html`
+        <div class="detail-view">
+          <cc-ev-editor
+            .hass=${this.hass}
+            .ev=${this._editingEv === "new" ? null : this._evs[this._editingEv]}
+            .chargerConfigs=${this._chargerConfigs}
+            .chargerNames=${names}
+            @ev-saved=${this._onEvSaved}
+            @editor-closed=${() => (this._editingEv = null)}
+          ></cc-ev-editor>
+        </div>
+      `;
+    }
+
+    const evs = Object.values(this._evs);
+    return html`
+      <div class="actions">
+        <ha-button @click=${() => (this._editingEv = "new")}>Add EV</ha-button>
+      </div>
+      ${evs.length === 0
+        ? html`<p>No EVs configured yet.</p>`
+        : html`
+            <div class="grid">
+              ${evs.map(
+                (ev) => html`
+                  <cc-ev-card
+                    .hass=${this.hass}
+                    .ev=${ev}
+                    .entities=${this._entities.evs?.[ev.ev_id] ?? {}}
+                    @ev-selected=${this._onEvSelected}
+                    @ev-edit=${(e: CustomEvent) => (this._editingEv = e.detail.evId)}
+                    @ev-delete=${this._onEvDelete}
+                  ></cc-ev-card>
+                `,
+              )}
+            </div>
+          `}
+    `;
+  }
+
+  private _renderEvDetail(ev: EvConfig | null) {
+    if (!ev) {
+      return html`<p>EV not found.</p>`;
+    }
+    return html`
+      <div class="detail-view">
+        <cc-ev-detail
+          .hass=${this.hass}
+          .ev=${ev}
+          .entities=${this._entities.evs?.[ev.ev_id] ?? {}}
+          .chargerControlSwitch=${this._entities.chargers[ev.charger_id]?.control_switch ?? null}
+        ></cc-ev-detail>
+      </div>
+    `;
+  }
+
   private _renderDetail(charger: ChargerData | null) {
     if (!charger) {
       return html`<p>Charger not found.</p>`;
@@ -356,12 +440,38 @@ export class ChargeControllerPanel extends LitElement {
 
   private _goBack() {
     this._selectedChargerId = null;
+    this._selectedEvId = null;
     this._navigate("");
   }
 
   private _onChargerSelected(e: CustomEvent<{ chargerId: string }>) {
     this._selectedChargerId = e.detail.chargerId;
     this._navigate(`/charger/${e.detail.chargerId}`);
+  }
+
+  private _onEvSelected(e: CustomEvent<{ evId: string }>) {
+    this._selectedEvId = e.detail.evId;
+    this._navigate(`/ev/${e.detail.evId}`);
+  }
+
+  private async _onEvSaved() {
+    this._editingEv = null;
+    await this._loadData();
+    // The backend reloads the integration after saving; entities exist shortly after
+    setTimeout(() => this._loadData(), 3000);
+  }
+
+  private async _onEvDelete(e: CustomEvent<{ evId: string }>) {
+    const ev = this._evs[e.detail.evId];
+    if (!ev || !confirm(`Delete EV "${ev.name}"?`)) {
+      return;
+    }
+    try {
+      await this.hass.callWS({ type: `${WS}/evs/delete`, ev_id: ev.ev_id });
+      await this._loadData();
+    } catch (err: any) {
+      this._error = err?.message ?? String(err);
+    }
   }
 
   private async _onHouseholdSaved() {
@@ -387,10 +497,13 @@ export class ChargeControllerPanel extends LitElement {
 
   private _applyRoute() {
     const path = this.route?.path ?? "";
+    this._selectedChargerId = null;
+    this._selectedEvId = null;
     if (path.startsWith("/charger/")) {
       this._selectedChargerId = decodeURIComponent(path.slice(9));
-    } else {
-      this._selectedChargerId = null;
+    } else if (path.startsWith("/ev/")) {
+      this._selectedEvId = decodeURIComponent(path.slice(4));
+      this._activeTab = "evs";
     }
     this._routeApplied = true;
   }

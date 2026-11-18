@@ -25,6 +25,21 @@ def charger_device_identifier(charger_id: str) -> tuple[str, str]:
     return (DOMAIN, f"charger_{charger_id}")
 
 
+def ev_device_identifier(ev_id: str) -> tuple[str, str]:
+    return (DOMAIN, f"ev_{ev_id}")
+
+
+def ev_device_info(ev_id: str, name: str) -> DeviceInfo:
+    """Device representing an EV."""
+    return DeviceInfo(
+        identifiers={ev_device_identifier(ev_id)},
+        name=name,
+        manufacturer=MANUFACTURER,
+        model="EV",
+        entry_type=DeviceEntryType.SERVICE,
+    )
+
+
 def household_device_info(household_id: str, name: str) -> DeviceInfo:
     """Device representing a household."""
     return DeviceInfo(

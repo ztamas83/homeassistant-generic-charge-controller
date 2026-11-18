@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
+import re
 import uuid
 from typing import TYPE_CHECKING
 
@@ -21,7 +23,27 @@ from .const import (
     CHARGER_PHASES,
     CHARGER_TYPES,
     DOMAIN,
+    EV_BATTERY_KWH,
+    EV_BATTERY_KWH_RANGE,
+    EV_CHARGER_ID,
+    EV_DEFAULT_FALLBACK_POWER_KW,
+    EV_DEFAULT_MAX_BLOCKS,
+    EV_DEFAULT_MODEL,
+    EV_ENTITY_DOMAINS,
+    EV_FALLBACK_POWER_KW,
+    EV_FALLBACK_POWER_KW_RANGE,
+    EV_MAX_BLOCKS,
+    EV_MAX_BLOCKS_RANGE,
+    EV_MODEL,
+    EV_MODELS,
+    EV_NAME,
+    EV_POWER_ENTITY,
+    EV_READY_BY,
+    EV_SOC_ENTITY,
     FUSE_MAX_A,
+    HH_PRICE_AREA,
+    HH_PRICE_CONFIG_ENTRY,
+    PRICE_AREAS,
     FUSE_MIN_A,
     HH_FUSE,
     HH_NAME,
@@ -34,6 +56,7 @@ from .unique_ids import (
     CHARGER_DATA_KEYS,
     CONTROL_SWITCH_KEY,
     charger_unique_id,
+    ev_unique_id,
     household_load_unique_id,
 )
 
@@ -45,6 +68,9 @@ _LOGGER = logging.getLogger(__name__)
 
 ERR_HOUSEHOLD_IN_USE = "household_in_use"
 ERR_RELEASE_FAILED = "release_failed"
+ERR_NOT_LOADED = "not_loaded"
+
+_READY_BY_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _unique_charger_phases(value: dict) -> dict:
@@ -64,6 +90,8 @@ HOUSEHOLD_CONFIG_SCHEMA = vol.Schema(
             vol.Required(key): cv.entity_domain("sensor")
             for key in HH_PHASE_ENTITIES.values()
         },
+        vol.Optional(HH_PRICE_CONFIG_ENTRY): vol.Any(None, str),
+        vol.Optional(HH_PRICE_AREA): vol.Any(None, vol.In(PRICE_AREAS)),
     }
 )
 
@@ -78,6 +106,26 @@ CHARGER_CONFIG_SCHEMA = vol.Schema(
     }
 )
 
+EV_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required(EV_NAME): vol.All(str, vol.Strip, vol.Length(min=1, max=64)),
+        vol.Required(EV_CHARGER_ID): str,
+        vol.Required(EV_BATTERY_KWH): vol.All(
+            vol.Coerce(float), vol.Range(min=EV_BATTERY_KWH_RANGE[0], max=EV_BATTERY_KWH_RANGE[1])
+        ),
+        vol.Optional(EV_SOC_ENTITY): vol.Any(None, cv.entity_id),
+        vol.Required(EV_POWER_ENTITY): cv.entity_id,
+        vol.Optional(EV_FALLBACK_POWER_KW, default=EV_DEFAULT_FALLBACK_POWER_KW): vol.All(
+            vol.Coerce(float),
+            vol.Range(min=EV_FALLBACK_POWER_KW_RANGE[0], max=EV_FALLBACK_POWER_KW_RANGE[1]),
+        ),
+        vol.Optional(EV_MAX_BLOCKS, default=EV_DEFAULT_MAX_BLOCKS): vol.All(
+            vol.Coerce(int), vol.Range(min=EV_MAX_BLOCKS_RANGE[0], max=EV_MAX_BLOCKS_RANGE[1])
+        ),
+        vol.Optional(EV_READY_BY): vol.Any(None, vol.All(str, vol.Match(_READY_BY_RE))),
+        vol.Optional(EV_MODEL, default=EV_DEFAULT_MODEL): vol.In(EV_MODELS),
+    }
+)
 
 SETTINGS_SCHEMA = vol.Schema(
     {
@@ -110,6 +158,12 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_households)
     websocket_api.async_register_command(hass, websocket_save_household)
     websocket_api.async_register_command(hass, websocket_delete_household)
+
+    websocket_api.async_register_command(hass, websocket_get_evs)
+    websocket_api.async_register_command(hass, websocket_save_ev)
+    websocket_api.async_register_command(hass, websocket_delete_ev)
+    websocket_api.async_register_command(hass, websocket_ev_plan)
+    websocket_api.async_register_command(hass, websocket_ev_learning_reset)
 
     websocket_api.async_register_command(hass, websocket_get_settings)
     websocket_api.async_register_command(hass, websocket_save_settings)
@@ -292,6 +346,114 @@ async def websocket_delete_household(
     connection.send_result(msg["id"], {"success": True})
 
 
+# EV commands
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/evs/get"})
+@callback
+def websocket_get_evs(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Return all configured EVs."""
+    connection.send_result(msg["id"], _get_store(hass).get_evs())
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/evs/save",
+        vol.Optional("ev_id"): str,
+        vol.Required("config"): EV_CONFIG_SCHEMA,
+    }
+)
+@websocket_api.async_response
+async def websocket_save_ev(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Create an EV, or update it when ev_id is given."""
+    store = _get_store(hass)
+    ev_id = msg.get("ev_id")
+    config = msg["config"]
+
+    if store.get_charger(config[EV_CHARGER_ID]) is None:
+        connection.send_error(
+            msg["id"], websocket_api.ERR_NOT_FOUND, "Charger not found"
+        )
+        return
+
+    if ev_id is None:
+        ev_id = uuid.uuid4().hex
+    elif store.get_ev(ev_id) is None:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "EV not found")
+        return
+
+    await store.async_save_ev(ev_id, config)
+    _async_reload_entries(hass)
+    connection.send_result(msg["id"], {"ev_id": ev_id})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/evs/delete",
+        vol.Required("ev_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_delete_ev(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Delete an EV configuration."""
+    await _get_store(hass).async_delete_ev(msg["ev_id"])
+    _async_reload_entries(hass)
+    connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/evs/plan",
+        vol.Required("ev_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_ev_plan(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Return the charge plan info of an EV."""
+    manager = hass.data.get(DOMAIN, {}).get("smart")
+    if manager is None:
+        connection.send_error(msg["id"], ERR_NOT_LOADED, "Smart charging not loaded")
+        return
+    connection.send_result(msg["id"], await manager.async_get_plan_info(msg["ev_id"]))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/evs/learning/reset",
+        vol.Required("ev_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_ev_learning_reset(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Reset the learned charging data of an EV."""
+    learning = hass.data.get(DOMAIN, {}).get("learning")
+    if learning is None:
+        connection.send_error(msg["id"], ERR_NOT_LOADED, "Learning not loaded")
+        return
+    result = learning.reset(msg["ev_id"])
+    if inspect.isawaitable(result):
+        await result
+    connection.send_result(msg["id"], {"success": True})
+
+
 # Settings commands
 @websocket_api.websocket_command(
     {
@@ -370,6 +532,18 @@ def websocket_get_entities(
                     ),
                 }
                 for charger_id in store.get_chargers()
+            },
+            "evs": {
+                ev_id: {
+                    key: entity_id
+                    for key, domain in EV_ENTITY_DOMAINS.items()
+                    if (
+                        entity_id := ent_reg.async_get_entity_id(
+                            domain, DOMAIN, ev_unique_id(ev_id, key)
+                        )
+                    )
+                }
+                for ev_id in store.get_evs()
             },
         },
     )
