@@ -110,6 +110,7 @@ EV_ENTITY_KEYS = (
     "next_charge_start",
     "planned_cost",
     "charge_now",
+    "force_charge",
 )
 
 # Platform of each per-EV entity (looked up by unique id)
@@ -118,6 +119,7 @@ EV_ENTITY_DOMAINS = {
     "target_soc": "number",
     "smart_charging": "switch",
     "control_charger": "switch",
+    "force_charge": "switch",
     "status": "sensor",
     "energy_needed": "sensor",
     "estimated_power": "sensor",

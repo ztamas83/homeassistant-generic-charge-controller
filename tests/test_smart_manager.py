@@ -145,6 +145,7 @@ CONTROL = "switch.car_control_charger"
 CURRENT_SOC = "number.car_current_state_of_charge"
 TARGET_SOC = "number.car_target_state_of_charge"
 CHARGE_NOW = "binary_sensor.car_charge_now"
+FORCE = "switch.car_charge_now"
 MODE = "sensor.garage_charger_load_balancing_mode"
 LB_SWITCH = "switch.garage_charger_load_balancing_load_balancing_active"
 
@@ -615,6 +616,81 @@ async def test_power_in_watts_is_converted(hass, start, easee_device):
     assert manager(hass)._power_kw(st) == pytest.approx(7.4)
 
 
+# Charge now (force_charge)
+
+
+async def test_force_charge_allows_outside_block_and_requests_refresh(hass, start, easee_device):
+    await start()
+    cid, m = easee_device.id, manager(hass)
+    await set_number(hass, TARGET_SOC, 20)
+    assert m.charging_allowed(cid) is False
+    refresh = AsyncMock()
+    m._coordinator.async_request_refresh = refresh
+
+    await set_switch(hass, FORCE, True)
+    assert m.charging_allowed(cid) is True
+    assert (await m.async_get_plan_info("ev1"))["force_charge"] is True
+    assert refresh.await_count == 1
+
+    await set_switch(hass, FORCE, False)
+    assert m.charging_allowed(cid) is False
+    assert (await m.async_get_plan_info("ev1"))["force_charge"] is False
+    assert refresh.await_count == 2
+
+
+async def test_force_charge_status_charging_when_charger_charges(hass, start, easee_device):
+    await start()
+    cid, m = easee_device.id, manager(hass)
+    await set_number(hass, TARGET_SOC, 20)
+    tick(m, cid, dt_util.utcnow(), mode="idle")
+    await m.async_update()
+    computed = hass.states.get(STATUS).state
+    assert computed != "charging"
+    await set_switch(hass, FORCE, True)
+    assert hass.states.get(STATUS).state == computed
+    tick(m, cid, dt_util.utcnow(), mode="charging")
+    await m.async_update()
+    assert hass.states.get(STATUS).state == "charging"
+    assert m.state("ev1").status == "charging"
+
+
+async def test_force_charge_turns_off_on_unplug(hass, start, easee_device):
+    await start()
+    cid, m = easee_device.id, manager(hass)
+    await set_number(hass, TARGET_SOC, 20)
+    tick(m, cid, dt_util.utcnow())
+    await set_switch(hass, FORCE, True)
+    refresh = AsyncMock()
+    m._coordinator.async_request_refresh = refresh
+
+    tick(m, cid, dt_util.utcnow(), connected=False)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(FORCE).state == STATE_OFF
+    assert m.charging_allowed(cid) is None
+    refresh.assert_called()
+
+
+async def test_force_charge_turns_off_at_target(hass, start, freezer, easee_device):
+    await start()
+    cid, m = easee_device.id, manager(hass)
+    await set_number(hass, TARGET_SOC, 20)
+    await set_number(hass, CURRENT_SOC, 19.9)
+    await set_switch(hass, FORCE, True)
+    assert hass.states.get(FORCE).state == STATE_ON
+    start_t = dt_util.utcnow()
+    await run_ticks(hass, m, cid, freezer, start_t, 600)  # SOC estimate keeps running
+    assert m.state("ev1").manual_soc >= 20
+    assert hass.states.get(FORCE).state == STATE_OFF
+
+
+async def test_force_charge_off_when_no_energy_needed(hass, start):
+    await start()
+    await set_number(hass, TARGET_SOC, 0)
+    await set_switch(hass, FORCE, True)
+    assert hass.states.get(FORCE).state == STATE_OFF
+
+
 # Entities
 
 
@@ -624,11 +700,12 @@ async def test_entities_created_for_ev(hass, start):
     for entity_id in (
         STATUS, "sensor.car_energy_needed", "sensor.car_estimated_power",
         "sensor.car_charge_duration", "sensor.car_next_charge_start", "sensor.car_planned_cost",
-        CURRENT_SOC, TARGET_SOC, SMART, CONTROL, CHARGE_NOW,
+        CURRENT_SOC, TARGET_SOC, SMART, CONTROL, CHARGE_NOW, FORCE,
     ):
         assert ent_reg.async_get(entity_id) is not None, entity_id
     assert hass.states.get(SMART).state == STATE_ON
     assert hass.states.get(CONTROL).state == STATE_ON
+    assert hass.states.get(FORCE).state == STATE_OFF
     assert float(hass.states.get(TARGET_SOC).state) == 80
     assert ev_device(hass, entry).name == "Car"
 

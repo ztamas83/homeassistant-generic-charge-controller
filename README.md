@@ -100,9 +100,11 @@ Setup:
 3. Set the SOC manually or link a SOC entity.
 
 Entities per EV: numbers `current_soc` and `target_soc`; switches
-`smart_charging` and `control_charger`; sensors `status`, `energy_needed`,
+`smart_charging`, `control_charger` and `force_charge`; sensors `status`, `energy_needed`,
 `estimated_power`, `charge_duration`, `next_charge_start`, `planned_cost`;
-binary sensor `charge_now`. With **control_charger** off the plan is only calculated (dry
+binary sensor `charge_now`. The **force_charge** switch ("Charge now") overrides the plan
+and lets the charger charge (load balancing still applies); it is not restored after a restart
+and turns off when the car is unplugged or the target is reached. With **control_charger** off the plan is only calculated (dry
 run). With it on, the charger is paused outside planned blocks. Pausing works
 only while the charger's **Load balancing active** switch is on.
 
