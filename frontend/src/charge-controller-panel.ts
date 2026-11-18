@@ -36,7 +36,10 @@ export class ChargeControllerPanel extends LitElement {
   @state() private _households: Record<string, HouseholdConfig> = {};
   @state() private _chargerConfigs: Record<string, ChargerConfig> = {};
   @state() private _discoveredChargers: DiscoveredCharger[] = [];
-  @state() private _entities: ControllerEntities = { households: {}, chargers: {} };
+  @state() private _entities: ControllerEntities = {
+    households: {},
+    chargers: {},
+  };
   @state() private _settings: ControllerSettings | null = null;
   /** Household being edited: an id, "new", or null when not editing. */
   @state() private _editingHousehold: string | null = null;
@@ -54,13 +57,14 @@ export class ChargeControllerPanel extends LitElement {
 
   private async _loadData() {
     try {
-      const [households, chargers, discovered, entities, settings] = await Promise.all([
-        this.hass.callWS({ type: `${WS}/households/get` }),
-        this.hass.callWS({ type: `${WS}/chargers/get` }),
-        this.hass.callWS({ type: `${WS}/chargers/discover` }),
-        this.hass.callWS({ type: `${WS}/entities` }),
-        this.hass.callWS({ type: `${WS}/settings/get` }),
-      ]);
+      const [households, chargers, discovered, entities, settings] =
+        await Promise.all([
+          this.hass.callWS({ type: `${WS}/households/get` }),
+          this.hass.callWS({ type: `${WS}/chargers/get` }),
+          this.hass.callWS({ type: `${WS}/chargers/discover` }),
+          this.hass.callWS({ type: `${WS}/entities` }),
+          this.hass.callWS({ type: `${WS}/settings/get` }),
+        ]);
       this._settings = settings;
       this._households = households;
       this._chargerConfigs = chargers;
@@ -90,25 +94,30 @@ export class ChargeControllerPanel extends LitElement {
       return html`<div class="loading">Loading...</div>`;
     }
 
-    const chargers = this._discoveredChargers.map((c) => getEaseeChargerData(this.hass, c));
+    const chargers = this._discoveredChargers.map((c) =>
+      getEaseeChargerData(this.hass, c),
+    );
     const inDetail = !!this._selectedChargerId;
     const selectedCharger = inDetail
-      ? chargers.find((c) => c.id === this._selectedChargerId) ?? null
+      ? (chargers.find((c) => c.id === this._selectedChargerId) ?? null)
       : null;
 
     return html`
       <div class="toolbar">
         ${inDetail
-          ? html`
-            <ha-icon-button .label=${"Back"} @click=${this._goBack}>
+          ? html` <ha-icon-button .label=${"Back"} @click=${this._goBack}>
               <ha-icon .icon=${"mdi:arrow-left"}></ha-icon>
             </ha-icon-button>`
           : nothing}
         <div class="title">
-          ${inDetail ? selectedCharger?.name ?? "Charger Details" : "Charge Controller"}
+          ${inDetail
+            ? (selectedCharger?.name ?? "Charger Details")
+            : "Charge Controller"}
         </div>
-        ${!inDetail
-          ? html`
+        <div class="build-id">${__BUILD_ID__}</div>
+      </div>
+      ${!inDetail
+        ? html`
             <div class="tabs">
               <div
                 class="tab ${this._activeTab === "households" ? "active" : ""}"
@@ -130,11 +139,13 @@ export class ChargeControllerPanel extends LitElement {
               </div>
             </div>
           `
-          : nothing}
-      </div>
+        : nothing}
+
       <div class="content">
         ${this._error
-          ? html`<div class="error-banner" @click=${() => (this._error = "")}>${this._error}</div>`
+          ? html`<div class="error-banner" @click=${() => (this._error = "")}>
+              ${this._error}
+            </div>`
           : nothing}
         ${inDetail
           ? this._renderDetail(selectedCharger)
@@ -142,14 +153,18 @@ export class ChargeControllerPanel extends LitElement {
             ? this._renderHouseholds()
             : this._activeTab === "chargers"
               ? this._renderChargers(chargers)
-              : html`<div class="detail-view"><cc-settings .hass=${this.hass}></cc-settings></div>`}
+              : html`<div class="detail-view">
+                  <cc-settings .hass=${this.hass}></cc-settings>
+                </div>`}
       </div>
     `;
   }
 
   /** Numeric state of one of the charger's sensors, null when unknown. */
   private _chargerValue(chargerId: string, key: string): number | null {
-    const entityId = (this._entities.chargers[chargerId] as Record<string, string>)?.[key];
+    const entityId = (
+      this._entities.chargers[chargerId] as Record<string, string>
+    )?.[key];
     const value = parseFloat(this.hass.states[entityId]?.state);
     return Number.isFinite(value) ? value : null;
   }
@@ -157,9 +172,13 @@ export class ChargeControllerPanel extends LitElement {
   private _renderChargerCard(charger: ChargerData, selectable: boolean) {
     const entities = this._entities.chargers[charger.id];
     const targets = entities
-      ? [1, 2, 3].map((i) => this._chargerValue(charger.id, `target_current_P${i}`))
+      ? [1, 2, 3].map((i) =>
+          this._chargerValue(charger.id, `target_current_P${i}`),
+        )
       : null;
-    const modeState = entities?.mode ? this.hass.states[entities.mode]?.state : undefined;
+    const modeState = entities?.mode
+      ? this.hass.states[entities.mode]?.state
+      : undefined;
     const controlActive = entities?.control_switch
       ? this.hass.states[entities.control_switch]?.state === "on"
       : null;
@@ -189,7 +208,8 @@ export class ChargeControllerPanel extends LitElement {
       return html`<p>No Easee chargers detected in your system.</p>`;
     }
 
-    const householdOf = (c: ChargerData) => this._chargerConfigs[c.id]?.household_id;
+    const householdOf = (c: ChargerData) =>
+      this._chargerConfigs[c.id]?.household_id;
     const unassigned = chargers.filter((c) => {
       const householdId = householdOf(c);
       return !householdId || !this._households[householdId];
@@ -200,20 +220,28 @@ export class ChargeControllerPanel extends LitElement {
         this._renderChargerGroup(
           h.name,
           chargers.filter((c) => householdOf(c) === h.household_id),
-          "No chargers assigned to this household."
-        )
+          "No chargers assigned to this household.",
+        ),
       )}
-      ${unassigned.length > 0 ? this._renderChargerGroup("Not configured", unassigned, "") : nothing}
+      ${unassigned.length > 0
+        ? this._renderChargerGroup("Not configured", unassigned, "")
+        : nothing}
     `;
   }
 
-  private _renderChargerGroup(title: string, chargers: ChargerData[], emptyText: string) {
+  private _renderChargerGroup(
+    title: string,
+    chargers: ChargerData[],
+    emptyText: string,
+  ) {
     return html`
       <section class="group">
         <h2 class="group-header">${title}</h2>
         ${chargers.length === 0
           ? html`<p class="group-empty">${emptyText}</p>`
-          : html`<div class="grid">${chargers.map((c) => this._renderChargerCard(c, true))}</div>`}
+          : html`<div class="grid">
+              ${chargers.map((c) => this._renderChargerCard(c, true))}
+            </div>`}
       </section>
     `;
   }
@@ -221,7 +249,9 @@ export class ChargeControllerPanel extends LitElement {
   private _renderHouseholds() {
     if (this._editingHousehold !== null) {
       const household =
-        this._editingHousehold === "new" ? null : this._households[this._editingHousehold];
+        this._editingHousehold === "new"
+          ? null
+          : this._households[this._editingHousehold];
       return html`
         <div class="detail-view">
           <cc-household-editor
@@ -237,7 +267,9 @@ export class ChargeControllerPanel extends LitElement {
     const households = Object.values(this._households);
     return html`
       <div class="actions">
-        <ha-button @click=${() => (this._editingHousehold = "new")}>Add household</ha-button>
+        <ha-button @click=${() => (this._editingHousehold = "new")}
+          >Add household</ha-button
+        >
       </div>
       ${households.length === 0
         ? html`<p>No households configured yet.</p>`
@@ -252,7 +284,7 @@ export class ChargeControllerPanel extends LitElement {
                       (this._editingHousehold = e.detail.householdId)}
                     @household-delete=${this._onHouseholdDelete}
                   ></cc-household-card>
-                `
+                `,
               )}
             </div>
           `}
@@ -271,12 +303,16 @@ export class ChargeControllerPanel extends LitElement {
           ? html`<cc-charger-status
               .hass=${this.hass}
               .config=${this._chargerConfigs[charger.id]}
-              .household=${this._households[this._chargerConfigs[charger.id].household_id] ?? null}
+              .household=${this._households[
+                this._chargerConfigs[charger.id].household_id
+              ] ?? null}
               .chargerEntities=${this._entities.chargers[charger.id] ?? {}}
               .householdEntities=${this._entities.households[
                 this._chargerConfigs[charger.id].household_id
               ] ?? {}}
-              .discovered=${this._discoveredChargers.find((d) => d.device_id === charger.id) ?? null}
+              .discovered=${this._discoveredChargers.find(
+                (d) => d.device_id === charger.id,
+              ) ?? null}
               .settings=${this._settings}
             ></cc-charger-status>`
           : nothing}
@@ -299,7 +335,11 @@ export class ChargeControllerPanel extends LitElement {
   /** Target current sensors P1-P3 of a charger; empty until all exist. */
   private _targetEntities(chargerId: string): string[] {
     const entities = this._entities.chargers[chargerId] ?? {};
-    const ids = [entities.target_current_P1, entities.target_current_P2, entities.target_current_P3];
+    const ids = [
+      entities.target_current_P1,
+      entities.target_current_P2,
+      entities.target_current_P3,
+    ];
     return ids.every((id) => id) ? (ids as string[]) : [];
   }
 
@@ -368,42 +408,69 @@ export class ChargeControllerPanel extends LitElement {
       align-items: center;
       height: 56px;
       padding: 0 16px;
-      background-color: var(--app-header-background-color, var(--primary-background-color));
+      background-color: var(
+        --app-header-background-color,
+        var(--primary-background-color)
+      );
       color: var(--app-header-text-color, var(--primary-text-color));
       border-bottom: 1px solid var(--divider-color);
       font-size: 20px;
+      position: sticky;
+      top: 0;
+      z-index: 4;
     }
 
     .toolbar .title {
+      font-weight: 400;
+      white-space: nowrap;
+      overflow: hidden;
       flex: 1;
+    }
+
+    .toolbar .build-id {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      white-space: nowrap;
     }
 
     .tabs {
       display: flex;
-      height: 100%;
-      align-items: center;
+      gap: 0;
+      border-bottom: 1px solid var(--divider-color);
+      padding: 0 16px;
+      background: var(--primary-background-color);
+      position: sticky;
+      top: 56px;
+      z-index: 3;
     }
 
     .tab {
-      padding: 0 16px;
+      padding: 12px 24px;
       cursor: pointer;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      font-size: 16px;
+      border: none;
+      background: none;
+      color: var(--secondary-text-color);
+      font-size: 14px;
+      font-weight: 500;
       border-bottom: 2px solid transparent;
-      transition: all 0.2s;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    .tab:hover {
+      color: var(--primary-text-color);
     }
 
     .tab.active {
-      border-bottom-color: var(--primary-color);
       color: var(--primary-color);
+      border-bottom-color: var(--primary-color);
     }
 
     .content {
-      padding: 16px;
-      height: calc(100vh - 56px - 32px);
-      overflow-y: auto;
+      padding: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+      box-sizing: border-box;
     }
 
     .grid {
