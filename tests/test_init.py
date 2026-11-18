@@ -1,5 +1,6 @@
 """Tests for generic_charge_controller initialization."""
 import re
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -97,13 +98,19 @@ async def test_remove_entry_clears_config(hass, hass_storage):
     assert hass.data[DOMAIN]["store"].get_households() == {}
 
 
-async def test_panel_url_contains_bundle_hash(hass):
+async def test_panel_url_contains_bundle_hash(hass, tmp_path):
     """The panel JS URL changes with the bundle content, so browsers do not use a stale copy."""
     hass.data[DOMAIN] = {}
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
+    # The built bundle is not tracked in git, so use a stand-in
+    (tmp_path / "frontend").mkdir()
+    (tmp_path / "frontend" / "controller-panel.js").write_text("// bundle")
 
     with patch(
+        "custom_components.generic_charge_controller.Path",
+        return_value=SimpleNamespace(parent=tmp_path),
+    ), patch(
         "custom_components.generic_charge_controller.async_register_built_in_panel"
     ) as mock_register:
         await _async_register_panel(hass)
