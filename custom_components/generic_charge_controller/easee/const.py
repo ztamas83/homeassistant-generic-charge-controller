@@ -9,6 +9,11 @@ CHRG_DOMAIN = "easee"
 # Service that sets the dynamic circuit limit per phase
 SVC_SET_LIMIT = "set_circuit_dynamic_limit"
 
+# Service that sends a charger action command (pause, resume, ...)
+SVC_ACTION_COMMAND = "action_command"
+ACTION_PAUSE = "pause"
+ACTION_RESUME = "resume"
+
 # Sensor keys; entity unique ids are "<serial>_<key>", e.g. "EH123456_circuit_current"
 S_NAME_CIRCUITCURRENT = "circuit_current"
 S_NAME_STATUS = "status"

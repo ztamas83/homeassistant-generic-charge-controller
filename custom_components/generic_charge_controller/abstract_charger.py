@@ -36,5 +36,19 @@ class AbstractCharger(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def async_pause(self) -> None:
+        """Pause the charging session with the charger's native pause command.
+
+        Raises HomeAssistantError when the command could not be sent.
+        """
+
+    @abc.abstractmethod
+    async def async_resume(self) -> None:
+        """Resume a session paused by async_pause, with the native resume command.
+
+        Raises HomeAssistantError when the command could not be sent.
+        """
+
+    @abc.abstractmethod
     async def async_release(self) -> None:
         """Remove the limits set by async_set_limits."""

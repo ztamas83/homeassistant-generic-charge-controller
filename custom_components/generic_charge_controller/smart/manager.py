@@ -54,6 +54,7 @@ _LOGGER = logging.getLogger(__name__)
 PLANS_STORAGE_VERSION = 1
 ENERGY_EPSILON_KWH = 0.05
 SESSION_KEY = "_session_completed"  # plans file key: EV ids whose plug session has completed
+PAUSED_KEY = "_paused_chargers"  # plans file key: charger ids paused by us
 MAX_TICK_GAP_S = 90  # longer gaps are not integrated into the SOC estimate
 MIN_ESTIMATE_POWER_KW = 0.2
 SOC_WRITE_STEP = 0.1
@@ -105,6 +106,8 @@ class SmartChargingManager:
         self._coordinator = coordinator
         self._plans_store: Store = Store(hass, PLANS_STORAGE_VERSION, f"{DOMAIN}_plans")
         self._persisted: dict[str, dict] = {}
+        self._paused: set[str] = set()
+        self.paused_loaded = False  # persisted pause state is available
         self._providers: dict[tuple[str, str], NordPoolPriceProvider] = {}
         self._listeners: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
@@ -141,6 +144,10 @@ class SmartChargingManager:
         for ev_id in completed if isinstance(completed, list) else []:
             if st := self._states.get(ev_id):
                 st.session_completed = True
+
+        paused = self._persisted.pop(PAUSED_KEY, [])
+        self._paused = {c for c in paused if isinstance(c, str)} if isinstance(paused, list) else set()
+        self.paused_loaded = True
 
         entry.async_on_unload(
             async_track_time_change(
@@ -488,12 +495,25 @@ class SmartChargingManager:
         elif changed:
             await self._coordinator.async_request_refresh()
 
+    def is_paused(self, charger_id: str) -> bool:
+        """Whether we paused the charger's session (kept across restarts)."""
+        return charger_id in self._paused
+
+    def set_paused(self, charger_id: str, paused: bool) -> None:
+        """Record that we paused (or resumed, or lost) the charger's session."""
+        if paused == (charger_id in self._paused):
+            return
+        self._paused.add(charger_id) if paused else self._paused.discard(charger_id)
+        self._plans_store.async_delay_save(self._plans_data, SAVE_DELAY_S)
+
     def _plans_data(self) -> dict[str, dict]:
         data: dict[str, Any] = {
             ev_id: st.plan.to_dict() for ev_id, st in self._states.items() if st.plan is not None
         }
         if completed := [ev_id for ev_id, st in self._states.items() if st.session_completed]:
             data[SESSION_KEY] = completed
+        if self._paused:
+            data[PAUSED_KEY] = sorted(self._paused)
         return data
 
     # Charger tick: plug session, SOC estimate and learning

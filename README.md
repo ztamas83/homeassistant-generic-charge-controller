@@ -89,7 +89,10 @@ linked to a configured charger.
   blocks), picking the cheapest ones. An optional ready-by time sets the
   deadline. If it is beyond the known prices, the EV waits for the next price
   publication.
-- Outside the planned blocks the charger is paused.
+- Outside the planned blocks the charging session is paused with Easee's native
+  pause command, and resumed with its resume command (requires the Easee
+  integration's `easee.action_command` service). Load balancing limits are not
+  changed by this. Only sessions paused by this integration are resumed.
 
 Setup:
 
@@ -106,7 +109,8 @@ Entities per EV: numbers `current_soc` and `target_soc`; switches
 and releases the charger at once (load balancing still applies). Turn Smart charging back on
 to replan from now; the charger is then paused at once if now is outside the plan. With **control_charger** off the plan is only calculated (dry
 run). With it on, the charger is paused outside planned blocks. Pausing works
-only while the charger's **Load balancing active** switch is on.
+only while the charger's **Load balancing active** switch is on; switching it
+off resumes a session paused by smart charging.
 
 Learning: the charging power is estimated from the EV's own power samples
 while it charges unthrottled, seeded from recorder history. Until 6 samples

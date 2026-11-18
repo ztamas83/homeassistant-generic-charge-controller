@@ -119,3 +119,16 @@ async def test_release_without_rated_current_fails(hass, easee_device):
 
     with pytest.raises(HomeAssistantError):
         await EaseeCharger(hass, easee_device.id).async_release()
+
+
+async def test_pause_and_resume_call_action_command(hass, easee_device):
+    calls = async_mock_service(hass, "easee", "action_command")
+    charger = EaseeCharger(hass, easee_device.id)
+
+    await charger.async_pause()
+    await charger.async_resume()
+
+    assert [c.data for c in calls] == [
+        {"device_id": easee_device.id, "action_command": "pause"},
+        {"device_id": easee_device.id, "action_command": "resume"},
+    ]

@@ -13,6 +13,8 @@ from homeassistant.helpers import entity_registry as er
 from ..abstract_charger import AbstractCharger
 from ..readings import read_current_a
 from .const import (
+    ACTION_PAUSE,
+    ACTION_RESUME,
     ATTR_CIRCUIT_RATED_CURRENT,
     ATTR_PHASE_CURRENT_TMP,
     CHRG_DOMAIN,
@@ -20,6 +22,7 @@ from .const import (
     NOT_CONNECTED_STATES,
     S_NAME_CIRCUITCURRENT,
     S_NAME_STATUS,
+    SVC_ACTION_COMMAND,
     SVC_SET_LIMIT,
 )
 
@@ -121,6 +124,22 @@ class EaseeCharger(AbstractCharger):
             },
             blocking=True,
         )
+
+    async def _async_action(self, action: str) -> None:
+        await self.hass.services.async_call(
+            CHRG_DOMAIN,
+            SVC_ACTION_COMMAND,
+            {"device_id": self.device_id, "action_command": action},
+            blocking=True,
+        )
+
+    async def async_pause(self) -> None:
+        """Pause the charging session (Easee action command "pause")."""
+        await self._async_action(ACTION_PAUSE)
+
+    async def async_resume(self) -> None:
+        """Resume the charging session (Easee action command "resume")."""
+        await self._async_action(ACTION_RESUME)
 
     async def async_release(self) -> None:
         """Set the dynamic circuit limit back to the circuit rated current."""
