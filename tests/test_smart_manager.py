@@ -117,7 +117,17 @@ def easee_calls(hass, easee_device):
 
 
 @pytest.fixture
-async def start(hass, hass_storage, easee_device, easee_calls, prices, freezer):
+def action_calls(hass):
+    """Mocked easee.action_command; each call has data["action_command"]."""
+    return async_mock_service(hass, "easee", "action_command")
+
+
+def actions(action_calls):
+    return [c.data["action_command"] for c in action_calls]
+
+
+@pytest.fixture
+async def start(hass, hass_storage, easee_device, easee_calls, action_calls, prices, freezer):
     """Return an async function that seeds storage, freezes time and sets up the integration."""
 
     async def _start(now=None, household_extra=None, **ev_overrides):
@@ -535,12 +545,14 @@ def limits(call):
     return (call.data["current_p1"], call.data["current_p2"], call.data["current_p3"])
 
 
-async def test_pause_outside_block_sends_zero(hass, start, freezer, easee_calls):
+async def test_pause_outside_block_uses_native_pause(hass, start, freezer, easee_calls, action_calls):
     await start()
     await set_number(hass, TARGET_SOC, 20)
     await lb_on(hass, freezer)
 
-    assert limits(easee_calls[-1]) == (0, 0, 0)
+    assert actions(action_calls) == ["pause"]
+    assert action_calls[0].data["device_id"] == easee_device_id(hass)
+    assert limits(easee_calls[-1]) == (11, 15, 16)  # load balancing limits, not 0
     mode = hass.states.get(MODE)
     assert mode.state == "scheduled_pause"
     assert "smart_charging" in mode.attributes["reasons"]
@@ -555,25 +567,108 @@ async def test_allowed_inside_block_sends_load_balancing_limits(hass, start, fre
     assert hass.states.get(MODE).state == "limited"
 
 
-async def test_block_boundary_requests_refresh_and_sends_zero(hass, start, freezer, easee_calls):
+async def test_block_boundary_pauses_and_block_start_resumes(
+    hass, start, freezer, easee_calls, action_calls
+):
+    await start(now=local(TODAY, CHEAP_HOUR - 1, 59, 50))
+    await set_number(hass, TARGET_SOC, 20)
+    await lb_on(hass, freezer)
+    assert actions(action_calls) == ["pause"]
+
+    await tick_to(hass, freezer, local(TODAY, CHEAP_HOUR, 0, 10))
+    assert actions(action_calls) == ["pause", "resume"]
+    assert hass.states.get(MODE).state != "scheduled_pause"
+
+    await tick_to(hass, freezer, local(TODAY, CHEAP_HOUR + 1, 0, 40))
+    assert actions(action_calls) == ["pause", "resume", "pause"]
+    assert hass.states.get(MODE).state == "scheduled_pause"
+    assert all(all(limits(c)) for c in easee_calls)  # never a 0 A limit
+
+
+async def test_inside_block_no_pause_and_no_resume_when_not_paused_by_us(
+    hass, start, freezer, action_calls
+):
     await start(now=local(TODAY, CHEAP_HOUR, 0, 10))
     await set_number(hass, TARGET_SOC, 20)
     await lb_on(hass, freezer)
-    assert limits(easee_calls[-1]) == (11, 15, 16)
-
-    await tick_to(hass, freezer, local(TODAY, CHEAP_HOUR + 1, 0, 40))
-
-    assert limits(easee_calls[-1]) == (0, 0, 0)
-    assert hass.states.get(MODE).state == "scheduled_pause"
+    await tick_to(hass, freezer, local(TODAY, CHEAP_HOUR, 5))
+    assert action_calls == []  # never paused by us: nothing to resume
 
 
-async def test_dry_run_leaves_charger_untouched(hass, start, freezer, easee_calls):
+async def test_pause_retried_after_90s_while_charging_max_three(
+    hass, start, freezer, action_calls
+):
+    await start()
+    await set_number(hass, TARGET_SOC, 20)
+    await lb_on(hass, freezer)
+    assert actions(action_calls) == ["pause"]
+
+    for expected in (2, 3, 3, 3):
+        await tick_to(hass, freezer, dt_util.utcnow() + timedelta(seconds=95))
+        assert len(action_calls) == expected  # still charging: retried, then gives up
+
+
+async def test_no_retry_when_charger_stopped(hass, start, freezer, action_calls):
+    await start()
+    await set_number(hass, TARGET_SOC, 20)
+    await lb_on(hass, freezer)
+    set_easee_states(hass, currents=(0, 0, 0), status="paused", rated_current=16)
+    await tick_to(hass, freezer, dt_util.utcnow() + timedelta(seconds=95))
+    assert actions(action_calls) == ["pause"]
+
+
+async def test_pause_error_is_retried_next_cycle(hass, start, freezer, action_calls):
+    await start()
+    await set_number(hass, TARGET_SOC, 20)
+    hass.services.async_remove("easee", "action_command")
+    await lb_on(hass, freezer)  # service missing: error is logged, not raised
+    assert not manager(hass).is_paused(easee_device_id(hass))
+    calls = async_mock_service(hass, "easee", "action_command")
+    await tick_to(hass, freezer, dt_util.utcnow() + timedelta(seconds=95))
+    assert actions(calls) == ["pause"]
+    assert manager(hass).is_paused(easee_device_id(hass))
+
+
+async def test_unplug_clears_pause_without_resume(hass, start, freezer, action_calls):
+    await start()
+    cid = easee_device_id(hass)
+    await set_number(hass, TARGET_SOC, 20)
+    await lb_on(hass, freezer)
+    assert manager(hass).is_paused(cid)
+
+    set_easee_states(hass, currents=(0, 0, 0), status="disconnected", rated_current=16)
+    await tick_to(hass, freezer, dt_util.utcnow() + timedelta(seconds=10))
+    assert actions(action_calls) == ["pause"]
+    assert not manager(hass).is_paused(cid)
+
+
+async def test_paused_state_survives_restart_and_resumes_when_allowed(
+    hass, start, freezer, action_calls, hass_storage
+):
+    entry = await start()
+    cid = easee_device_id(hass)
+    await set_number(hass, TARGET_SOC, 20)
+    await lb_on(hass, freezer)
+    await tick_to(hass, freezer, dt_util.utcnow() + timedelta(seconds=30))  # delayed save runs
+    assert hass_storage[f"{DOMAIN}_plans"]["data"]["_paused_chargers"] == [cid]
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert manager(hass).is_paused(cid)
+
+    await set_switch(hass, SMART, False)  # allowed again
+    assert actions(action_calls)[-1] == "resume"
+    assert not manager(hass).is_paused(cid)
+
+
+async def test_dry_run_leaves_charger_untouched(hass, start, freezer, easee_calls, action_calls):
     await start()
     await set_number(hass, TARGET_SOC, 20)
     await set_switch(hass, CONTROL, False)
     await lb_on(hass, freezer)
 
     assert limits(easee_calls[-1]) == (11, 15, 16)
+    assert action_calls == []
     assert hass.states.get(MODE).state == "limited"  # not scheduled_pause
     assert hass.states.get(CHARGE_NOW).state == STATE_OFF  # plan still calculated
 
@@ -626,18 +721,18 @@ async def press(hass, entity_id=BUTTON):
     await hass.async_block_till_done()
 
 
-async def test_charge_now_turns_smart_off_and_releases(hass, start, freezer, easee_calls):
+async def test_charge_now_turns_smart_off_and_resumes(hass, start, freezer, action_calls):
     await start()
     cid, m = easee_device_id(hass), manager(hass)
     await set_number(hass, TARGET_SOC, 20)
     await lb_on(hass, freezer)
-    assert limits(easee_calls[-1]) == (0, 0, 0)
+    assert actions(action_calls) == ["pause"]
     assert m.charging_allowed(cid) is False
 
-    await press(hass)  # no waiting for the update interval
+    await press(hass)  # resumes at once, even within 90 s of the pause
     assert hass.states.get(SMART).state == STATE_OFF
     assert m.charging_allowed(cid) is None
-    assert all(limits(easee_calls[-1]))  # non-zero current
+    assert actions(action_calls) == ["pause", "resume"]
     assert hass.states.get(MODE).state != "scheduled_pause"
     assert "force_charge" not in await m.async_get_plan_info("ev1")
 
@@ -651,45 +746,43 @@ async def test_charge_now_requests_immediate_refresh(hass, start, easee_device):
     refresh.assert_awaited_once_with(easee_device.id)
 
 
-async def test_smart_on_outside_block_pauses_in_next_cycle(hass, start, freezer, easee_calls):
+async def test_smart_on_outside_block_pauses_in_next_cycle(hass, start, freezer, action_calls):
     """Smart off released the charger; turning it on pauses at once, not after the interval."""
     await start()
     cid, m = easee_device_id(hass), manager(hass)
     await set_number(hass, TARGET_SOC, 20)
     await set_switch(hass, SMART, False)
     await lb_on(hass, freezer)
-    assert all(limits(easee_calls[-1]))  # released
-    sent = len(easee_calls)
+    assert action_calls == []  # released, never paused
 
-    freezer.tick(timedelta(seconds=2))  # well inside charger_update_interval
+    freezer.tick(timedelta(seconds=2))
     await set_switch(hass, SMART, True)
     assert m.charging_allowed(cid) is False
-    assert len(easee_calls) == sent + 1
-    assert limits(easee_calls[-1]) == (0, 0, 0)
+    assert actions(action_calls) == ["pause"]
     assert hass.states.get(MODE).state == "scheduled_pause"
 
 
-async def test_smart_off_releases_at_once(hass, start, freezer, easee_calls):
+async def test_smart_off_resumes_at_once(hass, start, freezer, action_calls):
     await start()
     await set_number(hass, TARGET_SOC, 20)
     await lb_on(hass, freezer)
-    assert limits(easee_calls[-1]) == (0, 0, 0)
+    assert actions(action_calls) == ["pause"]
 
     freezer.tick(timedelta(seconds=2))
     await set_switch(hass, SMART, False)
-    assert all(limits(easee_calls[-1]))
+    assert actions(action_calls) == ["pause", "resume"]
 
 
-async def test_pause_not_sent_early_without_user_action(hass, start, freezer, easee_calls):
-    """Only the user's smart toggle bypasses the update interval; other changes still wait."""
+async def test_control_inactive_resumes(hass, start, freezer, action_calls):
     await start()
     await set_number(hass, TARGET_SOC, 20)
-    await set_switch(hass, SMART, False)
     await lb_on(hass, freezer)
-    sent = len(easee_calls)
-    await set_switch(hass, CONTROL, False)
-    await set_switch(hass, CONTROL, True)  # control toggle: no immediate path
-    assert len(easee_calls) == sent
+    assert actions(action_calls) == ["pause"]
+    await set_switch(hass, LB_SWITCH, False)
+    await tick_to(hass, freezer, dt_util.utcnow() + timedelta(seconds=10))
+    assert actions(action_calls) == ["pause", "resume"]
+
+
 
 
 def easee_device_id(hass):

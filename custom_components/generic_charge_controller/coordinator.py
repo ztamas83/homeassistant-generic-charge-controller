@@ -43,7 +43,7 @@ from .const import (
     SETTING_STALE_AFTER,
     UPDATE_INTERVAL,
 )
-from .control import LimitSender, OverloadDetector
+from .control import LimitSender, OverloadDetector, PauseController
 from .loadbalancer.balancer import BalancerConfig, PhaseLoad, SafeLoadBalancer
 from .readings import read_current_a
 
@@ -80,7 +80,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self._overload_detectors: dict[str, OverloadDetector] = {}
         self._recheck_cancel: CALLBACK_TYPE | None = None
         self._recheck_at: datetime | None = None
-        self._immediate: set[str] = set()
+        self._pausers: dict[str, PauseController] = {}
 
     def _charger_update_interval(self) -> timedelta:
         return timedelta(seconds=self._settings[SETTING_CHARGER_UPDATE_INTERVAL])
@@ -108,8 +108,7 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         self._recheck_at = when
 
     async def async_refresh_now(self, charger_id: str) -> None:
-        """Recalculate at once; limits for this charger skip the update interval."""
-        self._immediate.add(charger_id)
+        """Recalculate at once, so a smart charging change pauses or resumes the charger now."""
         await self.async_refresh()
 
     async def async_shutdown(self) -> None:
@@ -252,11 +251,11 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         }
         reasons = list(result.reasons)
 
-        # Smart charging can only pause (lower limits), never raise what load
-        # balancing allows. None means no opinion.
+        # Smart charging pauses the session with the charger's native pause command;
+        # load balancing limits are sent as usual. None means no opinion.
         smart = self.hass.data[DOMAIN].get("smart")
-        if smart is not None and smart.charging_allowed(charger_id) is False:
-            targets_by_charger_phase = {phase: 0 for phase in targets_by_charger_phase}
+        pause = smart is not None and smart.charging_allowed(charger_id) is False
+        if pause:
             if mode != MODE_FAILSAFE:
                 mode = MODE_SCHEDULED_PAUSE
             reasons.append("smart_charging")
@@ -272,8 +271,6 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
         elif overload_pending_s is not None:
             self._schedule_recheck(overload_pending_s + 0.5, now)
 
-        immediate = charger_id in self._immediate
-        self._immediate.discard(charger_id)
         active = self.is_active(charger_id)
         if active:
             if charger.is_connected():
@@ -288,13 +285,26 @@ class ChargeControllerCoordinator(DataUpdateCoordinator):
                     result.failsafe,
                     overload,
                     now,
-                    immediate,
                 )
                 reasons += send_reasons
                 if pending and (due := sender.seconds_until_due(now)) is not None:
                     self._schedule_recheck(due + 0.5, now)
             else:
                 reasons.append("No car connected, limits not sent")
+
+        if smart is not None and smart.paused_loaded:
+            pauser = self._pausers.get(charger_id)
+            if pauser is None:
+                pauser = self._pausers[charger_id] = PauseController(
+                    smart.is_paused(charger_id),
+                    lambda paused, cid=charger_id: smart.set_paused(cid, paused),
+                )
+            if (
+                due := await pauser.async_apply(
+                    charger, pause, charger.is_connected(), active, now
+                )
+            ) is not None:
+                self._schedule_recheck(due + 0.5, now)
 
         for reason in reasons:
             _LOGGER.debug("Charger %s: %s", charger_id, reason)

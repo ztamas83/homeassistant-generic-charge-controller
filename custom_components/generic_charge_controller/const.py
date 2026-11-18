@@ -62,6 +62,8 @@ MODES = [MODE_IDLE, MODE_CHARGING, MODE_LIMITED, MODE_FAILSAFE, MODE_SCHEDULED_P
 MIN_CHARGING_CURRENT_A = 6  # IEC 61851 minimum; below this a phase is paused (0 A)
 
 # Sending limits to chargers
+PAUSE_RETRY_INTERVAL_S = 90  # wait before repeating a pause or resume command
+PAUSE_MAX_ATTEMPTS = 3  # pause commands per pause while the charger keeps charging
 CONTROL_RECONCILE_INTERVAL_S = 300  # resend unchanged limits to correct drift
 # A household phase above this share of the fuse rating for this long is sent at
 # once, regardless of the charger update interval
