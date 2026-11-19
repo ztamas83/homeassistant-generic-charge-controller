@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -177,17 +178,17 @@ def at(day, hour, minute=0):
 def test_hourly_buckets_and_local_hour_lookup():
     m = HourlyRateModel()
     assert m.predict_power_kw(None, T0) is None
-    for d in range(3):
+    for d in range(4):
         m.update(4.0, at=at(d, 2, 10))
         m.update(4.0, at=at(d, 2, 40))  # same bucket
         m.update(10.0, at=at(d, 5))
-    assert m.n_samples == 9
-    # 2 UTC hour: 6 samples at 4.0, 5 UTC hour: 3 samples at 10.0
+    assert m.n_samples == 12
+    # 2 UTC hour: 8 samples at 4.0, 5 UTC hour: 4 samples at 10.0
     assert m.predict_power_kw(None, at(10, 2)) == pytest.approx(4.0)
     assert m.predict_power_kw(None, at(10, 5)) == pytest.approx(10.0)
     # unknown hour falls back to the window mean
-    assert m.predict_power_kw(None, at(10, 9)) == pytest.approx((24 + 30) / 9)
-    assert m.predict_power_kw(None) == pytest.approx((24 + 30) / 9)
+    assert m.predict_power_kw(None, at(10, 9)) == pytest.approx(72 / 12)
+    assert m.predict_power_kw(None) == pytest.approx(72 / 12)
     # local hour: UTC+2 sees the 2 UTC hour as local hour 4
     tz = timezone(timedelta(hours=2))
     assert m.predict_power_kw(None, at(10, 2).astimezone(tz)) == pytest.approx(4.0)
@@ -203,9 +204,64 @@ def test_hourly_min_hour_samples_fallback():
     m.update(10.0, at=at(0, 6))
     m.update(10.0, at=at(1, 6))
     m.update(10.0, at=at(2, 6))
+    m.update(10.0, at=at(3, 6))
     assert m.predict_power_kw(None, at(5, 2)) == pytest.approx(m.predict_power_kw(None))
     assert m.predict_power_kw(None, at(5, 6)) == pytest.approx(10.0)
     assert m.hourly_profile(timezone.utc)[2] is None
+
+
+def test_hourly_per_hour_stats_and_confidence():
+    m = HourlyRateModel()
+    for d in range(3):
+        for v in (4.0, 6.0, 4.0, 6.0):  # 12 samples at the same local hour
+            m.update(v, at=at(d, 2))
+    tz = timezone.utc
+    stats = m._stats(m._hour_keys(2, tz))
+    n, mean, std = stats
+    assert n == 12 and mean == pytest.approx(5.0)
+    assert std == pytest.approx(math.sqrt(12 * 1.0 / 11))
+    expected = 1 - std / 5.0
+    assert m.hourly_confidence(tz)[2] == pytest.approx(expected)
+    assert m.hourly_confidence(tz)[3] == 0.0
+    assert m.hourly_profile(tz)[2] == pytest.approx(5.0)
+    assert m.confidence_at(at(9, 2)) == pytest.approx(expected)
+
+
+def test_hourly_low_confidence_hour_falls_back_to_window_mean():
+    m = HourlyRateModel()
+    for d, v in enumerate((1.0, 9.0, 1.0, 9.0)):  # noisy hour 2
+        m.update(v, at=at(d, 2))
+    for d in range(4):
+        for _ in range(3):
+            m.update(8.0, at=at(d, 6))
+    tz = timezone.utc
+    assert m.hourly_confidence(tz)[2] < HourlyRateModel.MIN_HOUR_CONFIDENCE
+    assert m.hourly_profile(tz)[2] is None
+    assert m.predict_power_kw(None, at(9, 2)) == pytest.approx(m.predict_power_kw(None))
+    assert m.confidence_at(at(9, 2)) == pytest.approx(m.confidence)
+    assert m.hourly_profile(tz)[6] == pytest.approx(8.0)
+
+
+def test_hourly_old_two_element_buckets_load():
+    m = HourlyRateModel.from_dict({"type": "hourly", "version": 1, "buckets": {"3600": [8.0, 2.0]}})
+    assert m._buckets[3600] == [8.0, 2.0, pytest.approx(32.0)]
+    assert m.std_kw == 0.0 and m.predict_power_kw(None) == pytest.approx(4.0)
+    again = HourlyRateModel.from_dict(m.to_dict())
+    assert again._buckets == m._buckets and m.to_dict()["version"] == HourlyRateModel.VERSION
+
+
+def test_hourly_window_confidence_uses_sample_std():
+    m = HourlyRateModel()
+    for d in range(4):
+        for _ in range(12):
+            m.update(2.0, at=at(d, 2))
+            m.update(10.0, at=at(d, 14))
+    tz = timezone.utc
+    conf = m.hourly_confidence(tz)
+    assert conf[2] == pytest.approx(1.0) and conf[14] == pytest.approx(1.0)
+    # window std is large (hours differ), so window confidence is low
+    assert m.std_kw == pytest.approx(4.0, abs=0.1)
+    assert m.confidence == pytest.approx(1 - m.std_kw / 6.0, abs=1e-6)
 
 
 def test_hourly_window_pruning():
@@ -271,3 +327,21 @@ async def test_power_at_and_estimate_over_slots(hass):
     assert est.power_kw == pytest.approx(6.0)
     assert est.duration == timedelta(hours=2) and est.source == "learned"
     assert len(est.hourly_kw) == 24 and any(v is not None for v in est.hourly_kw)
+    assert len(est.hourly_confidence) == 24 and max(est.hourly_confidence) > 0
+
+
+async def test_estimate_confidence_averages_slots_with_fallback_zero(hass):
+    mgr = LearningManager(hass)
+    for d in range(3):
+        for _ in range(4):
+            mgr._update("a", 4.0, "hourly", at(d, 2))
+    model = mgr.model("a", "hourly")
+    hour_conf = model.confidence_at(at(9, 2))
+    assert hour_conf == pytest.approx(1.0)  # 12 identical samples
+    est = mgr.estimate("a", 12.0, 11.0, None, "hourly", [at(9, 2), at(9, 5)])
+    # hour 5 falls back to the window mean (confidence of the window)
+    assert est.confidence == pytest.approx((hour_conf + model.confidence) / 2)
+    # no learned data: fallback power, confidence 0
+    fresh = LearningManager(hass)
+    est = fresh.estimate("b", 12.0, 11.0, None, "hourly", [at(9, 2)])
+    assert est.confidence == 0.0 and est.hourly_confidence == [0.0] * 24

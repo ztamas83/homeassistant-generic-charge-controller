@@ -668,6 +668,7 @@ class SmartChargingManager:
                 "confidence": estimate.confidence,
                 "n_samples": estimate.n_samples,
                 "hourly_kw": estimate.hourly_kw,
+                "hourly_confidence": [round(c, 2) for c in estimate.hourly_confidence],
             }
             if estimate
             else None,

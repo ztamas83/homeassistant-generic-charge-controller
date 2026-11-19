@@ -21,7 +21,6 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 SAVE_INTERVAL = timedelta(minutes=15)
 MIN_SAMPLES = 6
-MIN_CONFIDENCE = 0.3
 BACKFILL_DAYS = 7
 OUTLIER_SIGMA = 4.0
 OUTLIER_MIN_SAMPLES = 6
@@ -164,6 +163,18 @@ class LearningManager:
             return fallback_power_kw
         return predicted
 
+    @staticmethod
+    def _slot_confidence(
+        model: ChargeRateModel, at: datetime
+    ) -> float:
+        """Confidence behind a slot power, 0 when the fallback power is used."""
+        if model.n_samples < MIN_SAMPLES:
+            return 0.0
+        predicted = model.predict_power_kw(None, at)
+        if predicted is None or predicted <= 0:
+            return 0.0
+        return model.confidence_at(at)
+
     def estimate(
         self,
         ev_id: str,
@@ -183,15 +194,20 @@ class LearningManager:
         power = sum(
             self.power_at(ev_id, t, fallback_power_kw, soc, model_type) for t in times
         ) / len(times)
+        confs = [
+            self._slot_confidence(model, t) for t in times
+        ]
+        confidence = sum(confs) / len(confs)
         source = "learned" if model.n_samples >= MIN_SAMPLES else "fallback"
         hours = max(energy_kwh, 0.0) / power if power > 0 else 0.0
         return ChargeEstimate(
             duration=timedelta(hours=hours),
             power_kw=power,
             source=source,
-            confidence=model.confidence,
+            confidence=confidence,
             n_samples=model.n_samples,
             hourly_kw=model.hourly_profile(dt_util.DEFAULT_TIME_ZONE),
+            hourly_confidence=model.hourly_confidence(dt_util.DEFAULT_TIME_ZONE),
         )
 
 

@@ -11,6 +11,8 @@ const M = { top: 10, right: 8, bottom: 20, left: 30 };
 export class CcEvHourlyPower extends LitElement {
   /** 24 entries, index = local hour, null = not enough samples. */
   @property({ attribute: false }) public hourly: (number | null)[] | undefined;
+  /** 24 entries 0..1, confidence per hour (drives bar opacity). */
+  @property({ attribute: false }) public confidence: number[] | undefined;
   /** Estimate currently used (kW), drawn as a dashed line. */
   @property({ type: Number }) public estimatePower: number | null = null;
 
@@ -47,10 +49,15 @@ export class CcEvHourlyPower extends LitElement {
         ${data.map((v, h) => {
           const x = M.left + h * bw + bw * 0.15;
           const w = bw * 0.7;
-          const label = v == null ? `${pad(h)}:00  not enough data` : `${pad(h)}:00  ${v.toFixed(1)} kW`;
+          const c = Math.max(0, Math.min(1, this.confidence?.[h] ?? 0));
+          const label =
+            v == null
+              ? `${pad(h)}:00  not enough data`
+              : `${pad(h)}:00  ${v.toFixed(1)} kW  (confidence ${Math.round(c * 100)} %)`;
           return v == null
             ? svg`<rect class="stub" x=${x} y=${y(0) - 6} width=${w} height="6"><title>${label}</title></rect>`
             : svg`<rect class="bar ${h === nowHour ? "now" : ""}" x=${x} y=${y(v)} width=${w}
+                opacity=${0.25 + 0.75 * c}
                 height=${Math.max(y(0) - y(v), 1)}><title>${label}</title></rect>`;
         })}
         ${est != null && est > 0
@@ -63,6 +70,7 @@ export class CcEvHourlyPower extends LitElement {
             : nothing,
         )}
       </svg>
+      <div class="legend">Bar opacity = confidence. Faded hours use the window average.</div>
     `;
   }
 
@@ -94,11 +102,15 @@ export class CcEvHourlyPower extends LitElement {
     }
     .bar {
       fill: var(--cc-series-1, var(--primary-color));
-      opacity: 0.75;
     }
     .bar.now {
-      fill: var(--primary-color);
-      opacity: 1;
+      stroke: var(--primary-text-color);
+      stroke-width: 1.5;
+    }
+    .legend {
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+      margin-top: 2px;
     }
     .stub {
       fill: none;

@@ -26,6 +26,14 @@ class ChargeRateModel(ABC):
         """Learned power per local hour (24 values), None where unknown."""
         return [None] * 24
 
+    def hourly_confidence(self, tz: tzinfo) -> list[float]:
+        """Confidence per local hour (24 values), 0.0 where unknown."""
+        return [0.0] * 24
+
+    def confidence_at(self, at: datetime) -> float:
+        """Confidence behind the prediction for `at`."""
+        return self.confidence
+
     @property
     @abstractmethod
     def confidence(self) -> float:
@@ -125,20 +133,26 @@ class AverageRateModel(ChargeRateModel):
 class HourlyRateModel(ChargeRateModel):
     """Hour-of-day power over a sliding window of UTC hour buckets.
 
-    Each bucket (UTC hour start, epoch seconds) holds [weighted_sum_kw, weight_sum].
+    Each bucket (UTC hour start, epoch seconds) holds
+    [weighted_sum, weight_sum, weighted_sum_sq] of the samples.
     On update, buckets older than WINDOW_DAYS before the sample time are dropped. The
     window is relative to the newest sample, so data survives a period without charging.
-    Prediction for a time uses the mean of all buckets with the same local hour when that
-    hour has at least MIN_HOUR_SAMPLES weight, otherwise the overall window mean.
+    Per local hour, all window buckets of that hour are pooled into n_h (weight), mean_h
+    and std_h (pooled sample std). hour_confidence = min(n_h / HOUR_FULL_SAMPLES, 1) *
+    clamp(1 - std_h / mean_h). Prediction uses the hour mean when n_h >= MIN_HOUR_SAMPLES
+    and hour_confidence >= MIN_HOUR_CONFIDENCE, otherwise the window mean.
     An update without `at` goes into the newest bucket (or the current hour when empty)
     and does no pruning.
-    std_kw is the weighted std of the bucket means; confidence uses the AverageRateModel
-    formula on window values.
+    std_kw is the pooled sample std over the window; confidence uses the
+    AverageRateModel formula on window values.
     """
 
     TYPE = "hourly"
+    VERSION = 2
     WINDOW_DAYS = 7
     MIN_HOUR_SAMPLES = 3
+    HOUR_FULL_SAMPLES = 12
+    MIN_HOUR_CONFIDENCE = 0.3
 
     def __init__(self) -> None:
         self._buckets: dict[int, list[float]] = {}
@@ -159,39 +173,78 @@ class HourlyRateModel(ChargeRateModel):
         else:
             key = self._hour_start(at)
             prune = True
-        bucket = self._buckets.setdefault(key, [0.0, 0.0])
+        bucket = self._buckets.setdefault(key, [0.0, 0.0, 0.0])
         bucket[0] += power_kw * w
         bucket[1] += w
+        bucket[2] += power_kw * power_kw * w
         if prune:
             cutoff = max(self._buckets) - int(timedelta(days=self.WINDOW_DAYS).total_seconds())
             for k in [k for k in self._buckets if k < cutoff]:
                 del self._buckets[k]
 
-    def _mean(self, keys: list[int]) -> tuple[float, float] | None:
+    def _stats(self, keys: list[int]) -> tuple[float, float, float] | None:
+        """Pooled (weight, mean, sample std) of the given buckets, None without weight."""
         total = sum(self._buckets[k][0] for k in keys)
         weight = sum(self._buckets[k][1] for k in keys)
-        return (total / weight, weight) if weight > 0 else None
+        if weight <= 0:
+            return None
+        sq = sum(self._buckets[k][2] for k in keys)
+        mean = total / weight
+        var = max(sq - total * total / weight, 0.0) / (weight - 1) if weight > 1 else 0.0
+        return weight, mean, math.sqrt(var)
+
+    @classmethod
+    def _confidence_of(cls, stats: tuple[float, float, float] | None, full: float) -> float:
+        if stats is None or stats[1] <= 0:
+            return 0.0
+        weight, mean, std = stats
+        return min(weight / full, 1.0) * max(0.0, min(1.0, 1 - std / mean))
 
     def _hour_keys(self, hour: int, tz: tzinfo) -> list[int]:
         return [k for k in self._buckets if datetime.fromtimestamp(k, tz).hour == hour]
 
+    def _hour_use(self, hour: int, tz: tzinfo) -> tuple[float, float] | None:
+        """(mean, confidence) of a local hour when it is used for prediction, else None."""
+        stats = self._stats(self._hour_keys(hour, tz))
+        if stats is None or stats[0] < self.MIN_HOUR_SAMPLES:
+            return None
+        conf = self._confidence_of(stats, self.HOUR_FULL_SAMPLES)
+        if conf < self.MIN_HOUR_CONFIDENCE:
+            return None
+        return stats[1], conf
+
     def predict_power_kw(self, soc: float | None, at: datetime | None = None) -> float | None:
-        """Local-hour mean when known well enough, else the window mean."""
+        """Local-hour mean when reliable enough, else the window mean."""
         if at is not None:
             tz = at.tzinfo or timezone.utc
-            hour = self._mean(self._hour_keys(at.astimezone(tz).hour, tz))
-            if hour is not None and hour[1] >= self.MIN_HOUR_SAMPLES:
-                return hour[0]
-        overall = self._mean(list(self._buckets))
-        return overall[0] if overall else None
+            used = self._hour_use(at.astimezone(tz).hour, tz)
+            if used is not None:
+                return used[0]
+        overall = self._stats(list(self._buckets))
+        return overall[1] if overall else None
+
+    def confidence_at(self, at: datetime) -> float:
+        """Confidence behind the prediction for `at` (hour or window confidence)."""
+        tz = at.tzinfo or timezone.utc
+        used = self._hour_use(at.astimezone(tz).hour, tz)
+        if used is not None:
+            return used[1]
+        return self.confidence
 
     def hourly_profile(self, tz: tzinfo) -> list[float | None]:
-        """Mean power per local hour, None for hours under MIN_HOUR_SAMPLES."""
+        """Mean power per local hour, None for hours not used for prediction."""
         out: list[float | None] = []
         for hour in range(24):
-            m = self._mean(self._hour_keys(hour, tz))
-            out.append(m[0] if m is not None and m[1] >= self.MIN_HOUR_SAMPLES else None)
+            used = self._hour_use(hour, tz)
+            out.append(used[0] if used is not None else None)
         return out
+
+    def hourly_confidence(self, tz: tzinfo) -> list[float]:
+        """Confidence per local hour, 0.0 for hours without data."""
+        return [
+            self._confidence_of(self._stats(self._hour_keys(h, tz)), self.HOUR_FULL_SAMPLES)
+            for h in range(24)
+        ]
 
     @property
     def n_samples(self) -> int:
@@ -202,24 +255,14 @@ class HourlyRateModel(ChargeRateModel):
 
     @property
     def std_kw(self) -> float:
-        """Weighted standard deviation of the bucket means in the window."""
-        overall = self._mean(list(self._buckets))
-        if overall is None:
-            return 0.0
-        mean, weight = overall
-        var = sum(
-            b[1] * (b[0] / b[1] - mean) ** 2 for b in self._buckets.values() if b[1] > 0
-        ) / weight
-        return math.sqrt(max(var, 0.0))
+        """Pooled sample standard deviation over the window."""
+        stats = self._stats(list(self._buckets))
+        return stats[2] if stats else 0.0
 
     @property
     def confidence(self) -> float:
-        """Sample count and stability based confidence."""
-        overall = self._mean(list(self._buckets))
-        if overall is None or overall[0] <= 0:
-            return 0.0
-        stability = max(0.0, min(1.0, 1 - self.std_kw / overall[0]))
-        return min(self.n_samples / 20, 1.0) * stability
+        """Sample count and stability based window confidence."""
+        return self._confidence_of(self._stats(list(self._buckets)), 20.0)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize."""
@@ -231,10 +274,15 @@ class HourlyRateModel(ChargeRateModel):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HourlyRateModel:
-        """Deserialize."""
+        """Deserialize (2-element buckets get zero within-bucket variance)."""
         model = cls()
         for k, v in (data.get("buckets") or {}).items():
-            model._buckets[int(k)] = [float(v[0]), float(v[1])]
+            total, weight = float(v[0]), float(v[1])
+            if len(v) >= 3:
+                sq = float(v[2])
+            else:
+                sq = total * total / weight if weight > 0 else 0.0
+            model._buckets[int(k)] = [total, weight, sq]
         return model
 
 

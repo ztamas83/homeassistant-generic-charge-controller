@@ -26,6 +26,7 @@ class ChargeEstimate:
     confidence: float
     n_samples: int
     hourly_kw: list[float | None] = field(default_factory=lambda: [None] * 24)
+    hourly_confidence: list[float] = field(default_factory=lambda: [0.0] * 24)
 
 
 @dataclass(frozen=True)

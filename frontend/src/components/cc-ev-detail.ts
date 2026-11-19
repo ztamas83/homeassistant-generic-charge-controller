@@ -199,6 +199,7 @@ export class CcEvDetail extends LitElement {
                 </div>
                 <cc-ev-hourly-power
                   .hourly=${est.hourly_kw}
+                  .confidence=${est.hourly_confidence}
                   .estimatePower=${est.power_kw}
                 ></cc-ev-hourly-power>
               `
