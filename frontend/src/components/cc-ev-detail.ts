@@ -8,6 +8,7 @@ import {
   HomeAssistant,
 } from "../types";
 import "./cc-ev-schedule";
+import "./cc-ev-hourly-power";
 
 const WS = "generic_charge_controller";
 const REFRESH_MS = 60_000;
@@ -196,6 +197,10 @@ export class CcEvDetail extends LitElement {
                   <span class="label">Samples:</span>
                   <span class="value">${est.n_samples}</span>
                 </div>
+                <cc-ev-hourly-power
+                  .hourly=${est.hourly_kw}
+                  .estimatePower=${est.power_kw}
+                ></cc-ev-hourly-power>
               `
             : html`<p class="hint">No estimate available.</p>`}
         </div>
