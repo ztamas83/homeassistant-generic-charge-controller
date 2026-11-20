@@ -7,7 +7,7 @@ import { execSync } from "child_process";
 // changes, plus the build time, so a deploy can be verified in the browser
 const git = (cmd: string) => {
   try {
-    return execSync(`git ${cmd}`, { cwd: __dirname }).toString().trim();
+    return execSync(`git ${cmd}`, { cwd: import.meta.dirname }).toString().trim();
   } catch {
     return "";
   }
@@ -17,7 +17,7 @@ const dirty = git("status --porcelain") ? "-dirty" : "";
 const buildId = `${sha}${dirty} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
 
 // Third-party license notices are kept at the top of the built bundle
-const notices = readFileSync(resolve(__dirname, "../THIRD_PARTY_NOTICES"), "utf8");
+const notices = readFileSync(resolve(import.meta.dirname, "../THIRD_PARTY_NOTICES"), "utf8");
 
 export default defineConfig({
   define: {
@@ -36,14 +36,14 @@ export default defineConfig({
   ],
   build: {
     lib: {
-      entry: resolve(__dirname, "src/main.ts"),
+      entry: resolve(import.meta.dirname, "src/main.ts"),
       name: "ChargeControllerPanel",
       formats: ["iife"],
       fileName: () => "controller-panel.js",
     },
     outDir: "../custom_components/generic_charge_controller/frontend",
     emptyOutDir: false,
-    rollupOptions: {
+    rolldownOptions: {
       // No external dependencies – everything is bundled
     },
   },
