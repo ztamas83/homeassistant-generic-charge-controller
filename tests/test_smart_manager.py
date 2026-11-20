@@ -84,7 +84,7 @@ def ev_config(charger_id, **overrides):
     }
 
 
-def seed_storage(hass_storage, charger_id, household_extra=None, **ev_overrides):
+def seed_storage(hass_storage, charger_id, household_extra=None, extra_evs=None, **ev_overrides):
     hass_storage[DOMAIN] = storage_data(
         households={
             "house_1": {
@@ -105,7 +105,13 @@ def seed_storage(hass_storage, charger_id, household_extra=None, **ev_overrides)
                 "phase_map": PHASE_MAP,
             }
         },
-        evs={"ev1": ev_config(charger_id, **ev_overrides)},
+        evs={
+            "ev1": ev_config(charger_id, **ev_overrides),
+            **{
+                ev_id: ev_config(charger_id, ev_id=ev_id, **cfg)
+                for ev_id, cfg in (extra_evs or {}).items()
+            },
+        },
     )
 
 
@@ -131,9 +137,9 @@ def actions(action_calls):
 async def start(hass, hass_storage, easee_device, easee_calls, action_calls, prices, freezer):
     """Return an async function that seeds storage, freezes time and sets up the integration."""
 
-    async def _start(now=None, household_extra=None, **ev_overrides):
+    async def _start(now=None, household_extra=None, extra_evs=None, **ev_overrides):
         freezer.move_to(now or local(TODAY, 2, 7))
-        seed_storage(hass_storage, easee_device.id, household_extra, **ev_overrides)
+        seed_storage(hass_storage, easee_device.id, household_extra, extra_evs, **ev_overrides)
         entry = await setup_integration(hass)
         return entry
 
@@ -965,3 +971,163 @@ async def test_plan_info(hass, start):
     assert state.attributes["device_class"] == "monetary"
     assert info["deadline"] is None
     assert info["control_enabled"] and info["smart_enabled"]
+
+
+# Multi-EV selection
+
+SEL1 = "switch.car_selected_for_charging"
+SEL2 = "switch.truck_selected_for_charging"
+STATUS2 = "sensor.truck_status"
+TRUCK = {"truck": {"name": "Truck"}}
+PLUGGED = {"plugged_entity": "binary_sensor.car_plugged"}
+TRUCK_PLUGGED = {"truck": {"name": "Truck", "plugged_entity": "binary_sensor.truck_plugged"}}
+
+
+def set_plugged(hass, car, truck):
+    for entity_id, value in (("binary_sensor.car_plugged", car), ("binary_sensor.truck_plugged", truck)):
+        if value is not None:
+            hass.states.async_set(entity_id, value)
+
+
+async def flush_save(hass, freezer):
+    freezer.tick(timedelta(seconds=6))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+
+async def test_first_ev_selected_by_default(hass, start, easee_device):
+    await start(extra_evs=TRUCK)
+    m, cid = manager(hass), easee_device.id
+    assert m.ev_for_charger(cid) == "ev1"
+    assert hass.states.get(SEL1).state == STATE_ON
+    assert hass.states.get(SEL2).state == STATE_OFF
+    assert hass.states.get(STATUS2).state == "not_selected"
+    assert hass.states.get(STATUS).state != "not_selected"
+
+
+async def test_manual_select_is_radio_and_persists(hass, start, freezer, easee_device, hass_storage):
+    entry = await start(extra_evs=TRUCK)
+    m, cid = manager(hass), easee_device.id
+    await set_switch(hass, SEL2, True)
+    assert m.ev_for_charger(cid) == "truck"
+    assert hass.states.get(SEL1).state == STATE_OFF
+    assert hass.states.get(SEL2).state == STATE_ON
+    assert hass.states.get(STATUS).state == "not_selected"
+    await flush_save(hass, freezer)
+    assert hass_storage[f"{DOMAIN}_plans"]["data"]["_selected_evs"] == {cid: "truck"}
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert manager(hass).ev_for_charger(cid) == "truck"
+    assert hass.states.get(SEL2).state == STATE_ON
+
+    await set_switch(hass, SEL1, True)  # and back
+    assert manager(hass).ev_for_charger(cid) == "ev1"
+    assert hass.states.get(SEL2).state == STATE_OFF
+
+
+async def test_deselect_leaves_no_selected_ev(hass, start, freezer, easee_device, hass_storage):
+    entry = await start(extra_evs=TRUCK)
+    m, cid = manager(hass), easee_device.id
+    await set_number(hass, TARGET_SOC, 20)
+    assert m.state("ev1").plan is not None
+    await set_switch(hass, SEL1, False)
+    assert m.ev_for_charger(cid) is None
+    assert m.charging_allowed(cid) is None
+    assert m.state("ev1").plan is None
+    assert hass.states.get(STATUS).state == "not_selected"
+    assert hass.states.get(STATUS2).state == "not_selected"
+    await flush_save(hass, freezer)
+    assert hass_storage[f"{DOMAIN}_plans"]["data"]["_selected_evs"] == {cid: None}
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert manager(hass).ev_for_charger(cid) is None  # explicit none is not defaulted
+
+
+async def test_unselected_ev_has_no_plan_and_session(hass, start, easee_device):
+    await start(extra_evs=TRUCK)
+    m, cid = manager(hass), easee_device.id
+    await set_number(hass, TARGET_SOC, 20)
+    await set_number(hass, "number.truck_target_state_of_charge", 20)
+    tick(m, cid, dt_util.utcnow())
+    assert m.state("ev1").plan is not None
+    truck = m.state("truck")
+    assert truck.plan is None and truck.session_completed is False and truck.connected is None
+    assert hass.states.get(STATUS2).state == "not_selected"
+
+    await set_switch(hass, SEL2, True)  # A -> B
+    assert m.state("ev1").plan is None and m.state("ev1").connected is None
+    assert hass.states.get(STATUS).state == "not_selected"
+    assert m.state("truck").plan is not None
+    tick(m, cid, dt_util.utcnow())
+    assert m.state("truck").connected is True
+
+
+async def test_auto_select_when_exactly_one_is_plugged(hass, start, easee_device):
+    await start(extra_evs=TRUCK_PLUGGED, **PLUGGED)
+    m, cid = manager(hass), easee_device.id
+    set_plugged(hass, "off", "on")
+    tick(m, cid, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert m.ev_for_charger(cid) == "truck"
+    assert hass.states.get(SEL2).state == STATE_ON
+    assert hass.states.get(SEL1).state == STATE_OFF
+    tick(m, cid, dt_util.utcnow())
+    assert m.state("truck").connected is True
+
+
+async def test_auto_select_ignores_evs_without_sensor(hass, start, easee_device):
+    await start(extra_evs=TRUCK_PLUGGED)  # ev1 has no sensor
+    m, cid = manager(hass), easee_device.id
+    set_plugged(hass, None, "on")
+    tick(m, cid, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert m.ev_for_charger(cid) == "truck"
+
+
+@pytest.mark.parametrize(
+    ("car", "truck"),
+    [("on", "on"), ("off", "off"), ("on", "unavailable"), ("unavailable", "unavailable"),
+     ("on", "unknown"), ("on", None)],
+)
+async def test_auto_select_undecided_keeps_selection(hass, start, easee_device, car, truck):
+    await start(extra_evs=TRUCK_PLUGGED, **PLUGGED)
+    m, cid = manager(hass), easee_device.id
+    await set_switch(hass, SEL2, True)  # manual pick while unplugged
+    set_plugged(hass, car, truck)
+    tick(m, cid, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert m.ev_for_charger(cid) == "truck"
+
+
+async def test_manual_pick_blocks_auto_until_unplug(hass, start, easee_device):
+    await start(extra_evs=TRUCK_PLUGGED, **PLUGGED)
+    m, cid = manager(hass), easee_device.id
+    set_plugged(hass, "off", "off")
+    tick(m, cid, dt_util.utcnow())  # connected, undecided
+    await set_switch(hass, SEL2, True)  # manual pick in the session
+    set_plugged(hass, "on", "off")
+    tick(m, cid, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert m.ev_for_charger(cid) == "truck"
+
+    tick(m, cid, dt_util.utcnow(), connected=False)
+    await hass.async_block_till_done()
+    tick(m, cid, dt_util.utcnow(), connected=True)  # new session: auto selection is back
+    await hass.async_block_till_done()
+    assert m.ev_for_charger(cid) == "ev1"
+
+
+async def test_selection_falls_back_when_selected_ev_is_gone(
+    hass, start, hass_storage, easee_device
+):
+    hass_storage[f"{DOMAIN}_plans"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": f"{DOMAIN}_plans",
+        "data": {"_selected_evs": {easee_device.id: "truck"}},
+    }
+    await start()  # only ev1 exists
+    assert manager(hass).ev_for_charger(easee_device.id) == "ev1"
+    assert hass.states.get(SEL1).state == STATE_ON

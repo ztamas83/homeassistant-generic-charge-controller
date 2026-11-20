@@ -39,6 +39,7 @@ from .const import (
     EV_NAME,
     EV_POWER_ENTITY,
     EV_READY_BY,
+    EV_PLUGGED_ENTITY,
     EV_SOC_ENTITY,
     EV_TARGET_SOC_ENTITY,
     FUSE_MAX_A,
@@ -116,6 +117,7 @@ EV_CONFIG_SCHEMA = vol.Schema(
         ),
         vol.Optional(EV_SOC_ENTITY): vol.Any(None, cv.entity_id),
         vol.Optional(EV_TARGET_SOC_ENTITY): vol.Any(None, cv.entity_id),
+        vol.Optional(EV_PLUGGED_ENTITY): vol.Any(None, cv.entity_id),
         vol.Required(EV_POWER_ENTITY): cv.entity_id,
         vol.Optional(EV_FALLBACK_POWER_KW, default=EV_DEFAULT_FALLBACK_POWER_KW): vol.All(
             vol.Coerce(float),

@@ -27,6 +27,7 @@ from ..const import (
     EV_FALLBACK_POWER_KW,
     EV_MAX_BLOCKS,
     EV_MODEL,
+    EV_PLUGGED_ENTITY,
     EV_POWER_ENTITY,
     EV_READY_BY,
     EV_SOC_ENTITY,
@@ -41,6 +42,7 @@ from ..const import (
     STATUS_INSUFFICIENT_TIME,
     STATUS_NO_CHARGING_NEEDED,
     STATUS_NO_PRICE_SOURCE,
+    STATUS_NOT_SELECTED,
     STATUS_PLANNED,
     STATUS_WAITING_FOR_PRICES,
 )
@@ -56,6 +58,7 @@ PLANS_STORAGE_VERSION = 1
 ENERGY_EPSILON_KWH = 0.05
 SESSION_KEY = "_session_completed"  # plans file key: EV ids whose plug session has completed
 PAUSED_KEY = "_paused_chargers"  # plans file key: charger ids paused by us
+SELECTED_KEY = "_selected_evs"  # plans file key: {charger id: selected EV id or None}
 MAX_TICK_GAP_S = 90  # longer gaps are not integrated into the SOC estimate
 MIN_ESTIMATE_POWER_KW = 0.2
 SOC_WRITE_STEP = 0.1
@@ -109,6 +112,11 @@ class SmartChargingManager:
         self._persisted: dict[str, dict] = {}
         self._paused: set[str] = set()
         self.paused_loaded = False  # persisted pause state is available
+        # Selected EV per charger. A missing charger means the default (first linked EV),
+        # None means the user deselected every EV of the charger.
+        self._selected: dict[str, str | None] = {}
+        self._charger_connected: dict[str, bool] = {}
+        self._manual_pick: set[str] = set()  # chargers with a manual pick in this plug session
         self._providers: dict[tuple[str, str], NordPoolPriceProvider] = {}
         self._listeners: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
@@ -149,6 +157,14 @@ class SmartChargingManager:
         paused = self._persisted.pop(PAUSED_KEY, [])
         self._paused = {c for c in paused if isinstance(c, str)} if isinstance(paused, list) else set()
         self.paused_loaded = True
+
+        selected = self._persisted.pop(SELECTED_KEY, {})
+        if isinstance(selected, dict):
+            self._selected = {
+                charger_id: ev_id
+                for charger_id, ev_id in selected.items()
+                if isinstance(charger_id, str) and (ev_id is None or ev_id in self._states)
+            }
 
         entry.async_on_unload(
             async_track_time_change(
@@ -283,15 +299,68 @@ class SmartChargingManager:
         st = self._states.get(ev_id)
         return self._deadline(st.config, now or dt_util.utcnow()) if st else None
 
+    def _linked_evs(self, charger_id: str) -> list[str]:
+        return [
+            ev_id
+            for ev_id, st in self._states.items()
+            if st.config.get(EV_CHARGER_ID) == charger_id
+        ]
+
     def ev_for_charger(self, charger_id: str) -> str | None:
-        return next(
-            (
-                ev_id
-                for ev_id, st in self._states.items()
-                if st.config.get(EV_CHARGER_ID) == charger_id
-            ),
-            None,
-        )
+        """The selected EV of the charger: the stored pick, else the first linked EV."""
+        linked = self._linked_evs(charger_id)
+        if charger_id in self._selected:
+            selected = self._selected[charger_id]
+            if selected is None:
+                return None
+            if selected in linked:
+                return selected
+        return linked[0] if linked else None
+
+    def is_selected(self, ev_id: str) -> bool:
+        st = self._states.get(ev_id)
+        return st is not None and self.ev_for_charger(st.config.get(EV_CHARGER_ID) or "") == ev_id
+
+    def _select(self, charger_id: str, ev_id: str | None) -> None:
+        """Make ev_id (or no EV) the selected one of the charger and replan it."""
+        self._selected[charger_id] = ev_id
+        if ev_id is not None:
+            self._mark_dirty(self._states[ev_id])
+        self._plans_store.async_delay_save(self._plans_data, SAVE_DELAY_S)
+
+    async def async_set_selected(self, ev_id: str, value: bool) -> None:
+        """Manual pick: select the EV (deselecting the others) or deselect it."""
+        st = self._states.get(ev_id)
+        if st is None:
+            return
+        charger_id = st.config.get(EV_CHARGER_ID) or ""
+        if value == self.is_selected(ev_id):
+            return
+        self._select(charger_id, ev_id if value else None)
+        if self._charger_connected.get(charger_id):
+            self._manual_pick.add(charger_id)  # no auto selection until unplugged
+        await self.async_update(force_refresh=True)
+
+    def _plugged_state(self, ev_id: str) -> str | None:
+        """State of the EV's plugged sensor, None when it has none."""
+        entity_id = self._states[ev_id].config.get(EV_PLUGGED_ENTITY)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        return state.state if state is not None else "unknown"
+
+    def _auto_select(self, charger_id: str) -> bool:
+        """Select the EV whose plugged sensor is the only one on. True when the pick changed."""
+        states = {ev_id: self._plugged_state(ev_id) for ev_id in self._linked_evs(charger_id)}
+        states = {ev_id: s for ev_id, s in states.items() if s is not None}
+        on = [ev_id for ev_id, s in states.items() if s == "on"]
+        if len(on) != 1 or any(s != "off" for ev_id, s in states.items() if ev_id != on[0]):
+            return False  # undecided: keep the current selection
+        if self.ev_for_charger(charger_id) == on[0]:
+            return False
+        self._select(charger_id, on[0])
+        self.hass.async_create_task(self.async_update(force_refresh=True))
+        return True
 
     def charging_allowed(self, charger_id: str, now: datetime | None = None) -> bool | None:
         """True inside a planned block, False when the charger should pause, None for no opinion."""
@@ -495,6 +564,21 @@ class SmartChargingManager:
                     now,
                 )
 
+                if not self.is_selected(ev_id):
+                    # Only the selected EV of a charger is planned and tracked
+                    if st.plan is not None or st.session_completed:
+                        plans_changed = True
+                    st.plan = None
+                    st.slots_end = None
+                    st.session_completed = False
+                    st.connected = None
+                    st.charger_active = False
+                    st.last_tick = None
+                    st.dirty = True
+                    st.status = STATUS_NOT_SELECTED
+                    st.allowed = None
+                    continue
+
                 had_plan = st.plan
                 new_prices = (
                     bool(st.slots)
@@ -556,6 +640,8 @@ class SmartChargingManager:
             data[SESSION_KEY] = completed
         if self._paused:
             data[PAUSED_KEY] = sorted(self._paused)
+        if self._selected:
+            data[SELECTED_KEY] = dict(self._selected)
         return data
 
     # Charger tick: plug session, SOC estimate and learning
@@ -569,6 +655,12 @@ class SmartChargingManager:
         self, charger_id: str, now: datetime, mode: str, connected: bool
     ) -> None:
         """Handle a charger tick of the linked EV: plug session, SOC estimate, learning."""
+        previous = self._charger_connected.get(charger_id)
+        self._charger_connected[charger_id] = connected
+        if previous and not connected:
+            self._manual_pick.discard(charger_id)  # unplugged: auto selection is back
+        if connected and charger_id not in self._manual_pick and self._auto_select(charger_id):
+            return  # the new EV starts its plug session on the next tick
         ev_id = self.ev_for_charger(charger_id)
         st = self._states.get(ev_id) if ev_id else None
         if st is None:
@@ -682,4 +774,5 @@ class SmartChargingManager:
             "deadline": deadline.isoformat() if deadline else None,
             "control_enabled": st.control_enabled,
             "smart_enabled": st.smart_enabled,
+            "selected": self.is_selected(ev_id),
         }
