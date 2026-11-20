@@ -31,7 +31,8 @@
           "planned": "Planned",
           "charging": "Charging",
           "insufficient_time": "Insufficient time",
-          "completed": "Completed"
+          "completed": "Completed",
+          "not_selected": "Not selected"
         }
       },
       "energy_needed": { "name": "Energy needed" },
@@ -46,7 +47,8 @@
     },
     "switch": {
       "smart_charging": { "name": "Smart charging" },
-      "control_charger": { "name": "Control charger" }
+      "control_charger": { "name": "Control charger" },
+      "selected_for_charging": { "name": "Selected for charging" }
     },
     "button": {
       "start_charging": { "name": "Charge now" }

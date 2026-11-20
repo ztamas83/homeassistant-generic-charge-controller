@@ -94,7 +94,8 @@ export type EvEntityKey =
   | "next_charge_start"
   | "planned_cost"
   | "charge_now"
-  | "start_charging";
+  | "start_charging"
+  | "selected_for_charging";
 
 export interface ControllerEntities {
   households: Record<string, Partial<Record<HouseholdPhase, string>>>;
@@ -110,6 +111,7 @@ export interface EvConfig {
   battery_kwh: number;
   soc_entity: string | null;
   target_soc_entity: string | null;
+  plugged_entity: string | null;
   power_entity: string;
   fallback_power_kw: number;
   max_blocks: number;
@@ -125,7 +127,8 @@ export type EvStatus =
   | "planned"
   | "charging"
   | "insufficient_time"
-  | "completed";
+  | "completed"
+  | "not_selected";
 
 export interface PriceSlot {
   start: string;
@@ -167,6 +170,7 @@ export interface EvPlanInfo {
   deadline: string | null;
   control_enabled: boolean;
   smart_enabled: boolean;
+  selected: boolean;
 }
 
 export const EV_STATUS_TEXT: Record<string, string> = {
@@ -178,6 +182,7 @@ export const EV_STATUS_TEXT: Record<string, string> = {
   charging: "Charging",
   insufficient_time: "Insufficient time",
   completed: "Completed",
+  not_selected: "Not selected",
 };
 
 export interface ControllerSettings {

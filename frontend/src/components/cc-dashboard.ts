@@ -69,7 +69,7 @@ export class CcDashboard extends LitElement {
   private _signature(evId: string): string {
     const e = this.entities.evs?.[evId] ?? {};
     const s = (id?: string) => (id ? (this.hass?.states[id]?.state ?? "") : "");
-    return `${s(e.status)}|${s(e.charge_now)}|${s(e.smart_charging)}`;
+    return `${s(e.status)}|${s(e.charge_now)}|${s(e.smart_charging)}|${s(e.selected_for_charging)}`;
   }
 
   private _fetchAll() {
@@ -245,6 +245,7 @@ export class CcDashboard extends LitElement {
             : nothing}
           <div class="toggles">
             ${this._renderToggle("Smart charging", "mdi:brain", ents.smart_charging)}
+            ${this._renderToggle("Selected for charging", "mdi:car-electric", ents.selected_for_charging)}
             ${this._renderAction("Charge now", "mdi:flash", ents.start_charging)}
           </div>
         </div>

@@ -85,6 +85,7 @@ EV_CHARGER_ID = "charger_id"
 EV_BATTERY_KWH = "battery_kwh"
 EV_SOC_ENTITY = "soc_entity"
 EV_TARGET_SOC_ENTITY = "target_soc_entity"
+EV_PLUGGED_ENTITY = "plugged_entity"  # binary_sensor, on = plugged in
 EV_POWER_ENTITY = "power_entity"
 EV_FALLBACK_POWER_KW = "fallback_power_kw"
 EV_MAX_BLOCKS = "max_blocks"
@@ -114,6 +115,7 @@ EV_ENTITY_KEYS = (
     "planned_cost",
     "charge_now",
     "start_charging",
+    "selected_for_charging",
 )
 
 # Platform of each per-EV entity (looked up by unique id)
@@ -121,6 +123,7 @@ EV_ENTITY_DOMAINS = {
     "current_soc": "number",
     "target_soc": "number",
     "smart_charging": "switch",
+    "selected_for_charging": "switch",
     "control_charger": "switch",
     "start_charging": "button",
     "status": "sensor",
@@ -141,6 +144,7 @@ STATUS_PLANNED = "planned"
 STATUS_CHARGING = "charging"
 STATUS_INSUFFICIENT_TIME = "insufficient_time"
 STATUS_COMPLETED = "completed"
+STATUS_NOT_SELECTED = "not_selected"
 STATUSES = [
     STATUS_DISABLED,
     STATUS_NO_CHARGING_NEEDED,
@@ -150,4 +154,5 @@ STATUSES = [
     STATUS_CHARGING,
     STATUS_INSUFFICIENT_TIME,
     STATUS_COMPLETED,
+    STATUS_NOT_SELECTED,
 ]

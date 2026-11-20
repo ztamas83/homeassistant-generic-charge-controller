@@ -115,6 +115,23 @@ class ControlChargerSwitch(_EvSwitch):
         await self._manager.async_set_control_enabled(self._ev_id, False)
 
 
+class SelectedForChargingSwitch(EvEntity, SwitchEntity):
+    """Selects the EV as the one that charges on its charger (radio behavior)."""
+
+    _key = "selected_for_charging"
+    _attr_icon = "mdi:car-electric"
+
+    @property
+    def is_on(self) -> bool:
+        return self._manager.is_selected(self._ev_id)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._manager.async_set_selected(self._ev_id, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._manager.async_set_selected(self._ev_id, False)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -134,5 +151,6 @@ async def async_setup_entry(
         for entity in (
             SmartChargingSwitch(smart, ev_id),
             ControlChargerSwitch(smart, ev_id),
+            SelectedForChargingSwitch(smart, ev_id),
         )
     )

@@ -103,8 +103,19 @@ Setup:
 3. Set the SOC manually or link a SOC entity. Optionally link a target SOC sensor
    (for example the car's charge limit); the target is then read-only and follows the sensor.
 
+Several EVs can be linked to the same charger. Only the **selected** EV of a charger is
+planned, controls the charger and gets SOC estimate and learning; the others show status
+`not_selected`. By default the first EV of the charger is selected. Use the switch
+`selected_for_charging` (dashboard: "Selected for charging") to pick one; turning it on
+deselects the others, turning it off leaves the charger without a selected EV (released).
+The pick is kept across restarts. Optionally link a binary sensor per EV (**Plugged in
+sensor**, on = plugged in). While the charger has a car connected, the EV whose sensor is the
+only one on (all other sensors off) is selected automatically. Anything else (none on, several
+on, unavailable) keeps the current selection. A manual pick while a car is connected disables
+auto selection until the car is unplugged.
+
 Entities per EV: numbers `current_soc` and `target_soc`; switches
-`smart_charging` and `control_charger`; button `start_charging` ("Charge now"); sensors
+`smart_charging`, `control_charger` and `selected_for_charging`; button `start_charging` ("Charge now"); sensors
 `status`, `energy_needed`, `estimated_power`, `charge_duration`, `next_charge_start`,
 `planned_cost`; binary sensor `charge_now`. Pressing **Charge now** turns Smart charging off
 and releases the charger at once (load balancing still applies). Turn Smart charging back on

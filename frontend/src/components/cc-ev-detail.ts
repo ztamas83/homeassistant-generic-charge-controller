@@ -169,6 +169,7 @@ export class CcEvDetail extends LitElement {
           ${this._socControl("current_soc", "Current battery level")}
           ${this._socControl("target_soc", "Target battery level")}
           ${this._toggle("smart_charging", "Smart charging")}
+          ${this._toggle("selected_for_charging", "Selected for charging")}
           ${this._toggle("control_charger", "Control charger (off = dry run)")}
         </div>
       </ha-card>
