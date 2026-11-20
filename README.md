@@ -149,7 +149,7 @@ and fill in the SSH details (see the comments in the file), then:
 | `make test` | Run the tests |
 | `make deploy` | Build and copy the integration to Home Assistant (replaces the folder) |
 | `make restart-ha` | Check the configuration and restart Home Assistant Core |
-| `make release VERSION=x.y.z` | Set the manifest version, commit, tag `vx.y.z` and push |
+| `make release BUMP=minor` | Bump the version (`patch`, `minor`, `major`), commit, tag and push |
 | `make clean` | Remove local `__pycache__` folders |
 
 ### Releases
@@ -157,15 +157,20 @@ and fill in the SSH details (see the comments in the file), then:
 Development happens on `master`; releases are tags on it.
 
 ```bash
-make release VERSION=0.3.0
+make release BUMP=patch   # 0.3.1 -> 0.3.2
+make release BUMP=minor   # 0.3.1 -> 0.4.0
+make release BUMP=major   # 0.3.1 -> 1.0.0
+make release BUMP=minor BETA=1   # 0.3.1 -> 0.4.0-beta.1
 ```
 
-This sets `version` in `manifest.json`, commits, tags `v0.3.0` and pushes both.
+The next version is computed from the latest `vX.Y.Z` tag and confirmed before
+anything changes. The command then sets `version` in `manifest.json`, commits,
+tags and pushes both (master must be clean and in sync with `origin/master`).
 The tag triggers the release workflow: it runs the tests, hassfest and HACS
 validation, checks the tag matches the manifest version, builds the panel and
 publishes a GitHub release with `generic_charge_controller.zip`. HACS offers
-that release as an update. A version with a suffix (`0.3.0-beta.1`) becomes a
-GitHub pre-release, which HACS shows only to users who enabled beta versions.
+that release as an update. A beta (`0.4.0-beta.1`) becomes a GitHub
+pre-release, which HACS shows only to users who enabled beta versions.
 
 The work plan and design decisions are in [PLAN.md](PLAN.md).
 
