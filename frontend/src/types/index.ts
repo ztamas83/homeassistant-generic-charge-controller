@@ -150,6 +150,8 @@ export interface EvPlanInfo {
     source: "learned" | "fallback";
     confidence: number;
     n_samples: number;
+    hourly_kw?: (number | null)[];
+    hourly_confidence?: number[];
   } | null;
   plan: {
     blocks: PlanBlock[];

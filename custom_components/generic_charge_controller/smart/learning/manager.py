@@ -11,7 +11,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from ...const import DOMAIN
+from ...const import DOMAIN, EV_DEFAULT_MODEL
 from ..models import ChargeEstimate
 from .collector import SampleCollector
 from .model import ChargeRateModel, model_from_dict, MODELS
@@ -21,8 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 SAVE_INTERVAL = timedelta(minutes=15)
 MIN_SAMPLES = 6
-MIN_CONFIDENCE = 0.3
-BACKFILL_DAYS = 10
+BACKFILL_DAYS = 7
 OUTLIER_SIGMA = 4.0
 OUTLIER_MIN_SAMPLES = 6
 OUTLIER_WEIGHT = 0.01
@@ -68,15 +67,21 @@ class LearningManager:
         """Save on shutdown."""
         await self.async_save()
 
-    def model(self, ev_id: str, model_type: str = "average") -> ChargeRateModel:
+    def model(self, ev_id: str, model_type: str = EV_DEFAULT_MODEL) -> ChargeRateModel:
         """Return (creating if needed) the model of an EV."""
         existing = self._models.get(ev_id)
         if existing is None or (existing.TYPE != model_type and model_type in MODELS):
-            existing = MODELS.get(model_type, MODELS["average"])()
+            existing = MODELS.get(model_type, MODELS[EV_DEFAULT_MODEL])()
             self._models[ev_id] = existing
         return existing
 
-    def _update(self, ev_id: str, sample: float, model_type: str = "average") -> None:
+    def _update(
+        self,
+        ev_id: str,
+        sample: float,
+        model_type: str = EV_DEFAULT_MODEL,
+        at: datetime | None = None,
+    ) -> None:
         model = self.model(ev_id, model_type)
         weight = 1.0
         if (
@@ -86,7 +91,7 @@ class LearningManager:
             and abs(sample - mean) > OUTLIER_SIGMA * model.std_kw
         ):
             weight = OUTLIER_WEIGHT
-        model.update(sample, weight)
+        model.update(sample, weight, at=at)
         self._dirty = True
 
     def feed(
@@ -96,13 +101,13 @@ class LearningManager:
         power_kw: float | None,
         mode: str,
         connected: bool,
-        model_type: str = "average",
+        model_type: str = EV_DEFAULT_MODEL,
     ) -> None:
         """Feed a coordinator tick."""
         collector = self._collectors.setdefault(ev_id, SampleCollector())
         sample = collector.add(now, power_kw, mode, connected)
         if sample is not None:
-            self._update(ev_id, sample, model_type)
+            self._update(ev_id, sample, model_type, now)
 
     def reset(self, ev_id: str) -> None:
         """Forget everything learned for an EV."""
@@ -111,7 +116,7 @@ class LearningManager:
         self._dirty = True
 
     async def async_backfill(
-        self, ev_id: str, power_entity: str, model_type: str = "average"
+        self, ev_id: str, power_entity: str, model_type: str = EV_DEFAULT_MODEL
     ) -> None:
         """Seed an empty model from recorder statistics."""
         if self.model(ev_id, model_type).n_samples > 0:
@@ -139,7 +144,36 @@ class LearningManager:
         for row in (result or {}).get(power_entity, []):
             mean = row.get("mean")
             if mean is not None and mean >= 1.0:
-                self._update(ev_id, float(mean), model_type)
+                self._update(ev_id, float(mean), model_type, _row_start(row))
+
+    def power_at(
+        self,
+        ev_id: str,
+        at: datetime,
+        fallback_power_kw: float,
+        soc: float | None = None,
+        model_type: str = EV_DEFAULT_MODEL,
+    ) -> float:
+        """Expected charging power (kW) for a slot starting at `at`."""
+        model = self.model(ev_id, model_type)
+        if model.n_samples < MIN_SAMPLES:
+            return fallback_power_kw
+        predicted = model.predict_power_kw(soc, at)
+        if predicted is None or predicted <= 0:
+            return fallback_power_kw
+        return predicted
+
+    @staticmethod
+    def _slot_confidence(
+        model: ChargeRateModel, at: datetime
+    ) -> float:
+        """Confidence behind a slot power, 0 when the fallback power is used."""
+        if model.n_samples < MIN_SAMPLES:
+            return 0.0
+        predicted = model.predict_power_kw(None, at)
+        if predicted is None or predicted <= 0:
+            return 0.0
+        return model.confidence_at(at)
 
     def estimate(
         self,
@@ -147,25 +181,41 @@ class LearningManager:
         energy_kwh: float,
         fallback_power_kw: float,
         soc: float | None = None,
-        model_type: str = "average",
+        model_type: str = EV_DEFAULT_MODEL,
+        slot_starts: list[datetime] | None = None,
+        now: datetime | None = None,
     ) -> ChargeEstimate:
-        """Estimate charge duration for an energy amount."""
+        """Estimate charge power and duration for an energy amount.
+
+        The power is the mean expected power over `slot_starts` (or at `now`).
+        """
         model = self.model(ev_id, model_type)
-        predicted = model.predict_power_kw(soc)
-        if (
-            predicted is not None
-            and predicted > 0
-            and model.n_samples >= MIN_SAMPLES
-            and model.confidence >= MIN_CONFIDENCE
-        ):
-            power, source = predicted, "learned"
-        else:
-            power, source = fallback_power_kw, "fallback"
+        times = slot_starts or [now or dt_util.utcnow()]
+        power = sum(
+            self.power_at(ev_id, t, fallback_power_kw, soc, model_type) for t in times
+        ) / len(times)
+        confs = [
+            self._slot_confidence(model, t) for t in times
+        ]
+        confidence = sum(confs) / len(confs)
+        source = "learned" if model.n_samples >= MIN_SAMPLES else "fallback"
         hours = max(energy_kwh, 0.0) / power if power > 0 else 0.0
         return ChargeEstimate(
             duration=timedelta(hours=hours),
             power_kw=power,
             source=source,
-            confidence=model.confidence,
+            confidence=confidence,
             n_samples=model.n_samples,
+            hourly_kw=model.hourly_profile(dt_util.DEFAULT_TIME_ZONE),
+            hourly_confidence=model.hourly_confidence(dt_util.DEFAULT_TIME_ZONE),
         )
+
+
+def _row_start(row: dict[str, Any]) -> datetime | None:
+    """Start of a statistics row (float epoch or datetime) as an aware datetime."""
+    start = row.get("start")
+    if isinstance(start, datetime):
+        return start if start.tzinfo else start.replace(tzinfo=dt_util.UTC)
+    if isinstance(start, (int, float)):
+        return dt_util.utc_from_timestamp(float(start))
+    return None

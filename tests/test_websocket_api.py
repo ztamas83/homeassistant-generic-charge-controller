@@ -329,7 +329,7 @@ async def test_ev_save_get_delete(hass, ws, easee_device):
     assert evs[ev_id]["ev_id"] == ev_id
     assert evs[ev_id]["fallback_power_kw"] == 11.0
     assert evs[ev_id]["max_blocks"] == 2
-    assert evs[ev_id]["model"] == "average"
+    assert evs[ev_id]["model"] == "hourly"
     assert evs[ev_id]["ready_by"] == "07:30"
 
     result = await ws("evs/save", ev_id=ev_id, config={**config, "max_blocks": 4})

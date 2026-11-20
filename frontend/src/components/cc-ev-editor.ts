@@ -131,7 +131,7 @@ export class CcEvEditor extends LitElement {
       fallback_power_kw: d.fallback_power_kw,
       max_blocks: d.max_blocks,
       ready_by: toHm(d.ready_by),
-      model: d.model ?? "average",
+      model: d.model ?? "hourly",
     };
     try {
       await this.hass.callWS({

@@ -211,6 +211,8 @@ class EvEstimatedPowerSensor(_EvSensor):
             "source": estimate.source,
             "confidence": round(estimate.confidence, 3),
             "n_samples": estimate.n_samples,
+            "hourly_kw": estimate.hourly_kw,
+            "hourly_confidence": [round(c, 2) for c in estimate.hourly_confidence],
         }
 
 

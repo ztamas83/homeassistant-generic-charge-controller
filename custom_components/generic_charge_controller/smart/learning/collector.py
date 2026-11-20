@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-INVALID_MODES = {"limited", "scheduled_pause", "failsafe"}
+INVALID_MODES = {"scheduled_pause", "failsafe"}
 MIN_POWER_KW = 1.0
 BATCH_SECONDS = 300.0
 MAX_GAP_SECONDS = 90.0

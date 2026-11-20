@@ -6,26 +6,31 @@ Pure calculation without Home Assistant dependencies.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Callable
 
 from .models import ChargeBlock, ChargePlan, PriceSlot
 
-_INF = (math.inf, 0, 0)
+UNITS_PER_KWH = 100  # energy resolution of the DP (0.01 kWh)
+
+# (energy units capped at need, cost, first slot index, bitmask of taken slots)
+_State = tuple[int, float, int, int]
 
 
 def plan_cheapest(
     slots: list[PriceSlot],
     now: datetime,
     deadline: datetime | None,
-    duration: timedelta,
+    energy_kwh: float,
     max_blocks: int,
-    power_kw: float,
+    power_at: Callable[[datetime], float],
     inputs_key: str = "",
 ) -> ChargePlan:
-    """Pick the cheapest slots for `duration`, in at most `max_blocks` contiguous runs.
+    """Pick the cheapest slots delivering `energy_kwh`, in at most `max_blocks` runs.
 
     Window: slots ending after `now` and starting before `deadline`. The running
-    slot is included and counts as a whole slot.
+    slot is included and counts as a whole slot. A slot delivers
+    power_at(slot.start) * slot hours.
     """
     window = sorted(
         (
@@ -36,80 +41,108 @@ def plan_cheapest(
         ),
         key=lambda s: s.start,
     )
-    if not window or duration <= timedelta(0):
+    if not window or energy_kwh <= 0:
         return ChargePlan([], window, 0.0, now, inputs_key, False)
 
-    slot_len = window[0].end - window[0].start
-    n_needed = math.ceil(duration / slot_len)
+    energies = [max(0.0, power_at(s.start)) * (s.end - s.start).total_seconds() / 3600 for s in window]
+    need = math.ceil(energy_kwh * UNITS_PER_KWH - 1e-6)
+    units = [round(e * UNITS_PER_KWH) for e in energies]
     insufficient = False
-    if len(window) <= n_needed:
-        insufficient = len(window) < n_needed
+    if sum(units) <= need:
+        insufficient = sum(units) < need
         selected = list(range(len(window)))
     else:
-        selected = _select(window, n_needed, max(1, max_blocks))
+        selected = _select(window, energies, units, need, max(1, max_blocks))
 
-    return _build(window, selected, power_kw, now, inputs_key, insufficient)
+    return _build(window, energies, selected, energy_kwh, now, inputs_key, insufficient)
 
 
-def _select(window: list[PriceSlot], n: int, max_blocks: int) -> list[int]:
-    """DP: min cost over exactly n slots in at most max_blocks runs."""
+def _prune(states: list[_State]) -> list[_State]:
+    """Keep the Pareto front: more energy and lower cost win, then earlier first slot."""
+    states.sort(key=lambda s: (-s[0], s[1], s[2]))
+    out: list[_State] = []
+    best_cost = math.inf
+    for st in states:
+        if st[1] < best_cost:
+            out.append(st)
+            best_cost = st[1]
+    return out
+
+
+def _select(
+    window: list[PriceSlot],
+    energies: list[float],
+    units: list[int],
+    need: int,
+    max_blocks: int,
+) -> list[int]:
+    """DP: min cost to reach `need` energy units in at most max_blocks runs."""
     m = len(window)
-    # state (j selected, k blocks, last selected?) -> (cost, first index, bitmask)
-    cur: dict[tuple[int, int, bool], tuple[float, int, int]] = {(0, 0, False): (0.0, 0, 0)}
+    suffix = [0] * (m + 1)
+    for i in range(m - 1, -1, -1):
+        suffix[i] = suffix[i + 1] + units[i]
+    # (blocks used, previous slot taken) -> Pareto front
+    cur: dict[tuple[int, bool], list[_State]] = {(0, False): [(0, 0.0, 0, 0)]}
     for i, slot in enumerate(window):
         contiguous = i > 0 and window[i - 1].end == slot.start
-        nxt: dict[tuple[int, int, bool], tuple[float, int, int]] = {}
-
-        def put(key: tuple[int, int, bool], val: tuple[float, int, int]) -> None:
-            old = nxt.get(key)
-            if old is None or (val[0], val[1]) < (old[0], old[1]):
-                nxt[key] = val
-
-        for (j, k, last), (cost, first, mask) in cur.items():
-            # skip slot
-            put((j, k, False), (cost, first, mask))
-            # take slot
-            if j < n and m - i >= n - j:
-                if last and contiguous:
-                    nk = k
-                else:
-                    nk = k + 1
-                if nk <= max_blocks:
-                    nfirst = first if j > 0 else i
-                    put(
-                        (j + 1, nk, True),
-                        (round(cost + slot.price, 9), nfirst, mask | (1 << i)),
+        cand: dict[tuple[int, bool], list[_State]] = {}
+        for (k, last), front in cur.items():
+            for e, cost, first, mask in front:
+                if e + suffix[i + 1] >= need:
+                    cand.setdefault((k, False), []).append((e, cost, first, mask))
+                if e >= need:
+                    continue
+                nk = k if (last and contiguous) else k + 1
+                if nk > max_blocks:
+                    continue
+                ne = min(need, e + units[i])
+                if ne + suffix[i + 1] < need:
+                    continue
+                cand.setdefault((nk, True), []).append(
+                    (
+                        ne,
+                        round(cost + slot.price * energies[i], 9),
+                        first if mask else i,
+                        mask | (1 << i),
                     )
-        cur = nxt
+                )
+        cur = {key: _prune(v) for key, v in cand.items()}
 
     best: tuple[float, int, int, int] | None = None
-    for (j, k, _), (cost, first, mask) in cur.items():
-        if j != n:
-            continue
-        cand = (cost, k, first, mask)
-        if best is None or cand[:3] < best[:3]:
-            best = cand
+    for (k, _), front in cur.items():
+        for e, cost, first, mask in front:
+            if e >= need and mask:
+                c = (cost, k, first, mask)
+                if best is None or c[:3] < best[:3]:
+                    best = c
     assert best is not None
     return [i for i in range(m) if best[3] >> i & 1]
 
 
 def _build(
     window: list[PriceSlot],
+    energies: list[float],
     selected: list[int],
-    power_kw: float,
+    energy_kwh: float,
     now: datetime,
     inputs_key: str,
     insufficient: bool,
 ) -> ChargePlan:
-    """Merge selected slots into blocks and compute costs."""
+    """Merge selected slots into blocks and compute costs.
+
+    In chronological order the last slot's energy is cut to what is still needed.
+    """
     blocks: list[ChargeBlock] = []
     total = 0.0
+    remaining = energy_kwh
     cur_start: datetime | None = None
     cur_end: datetime | None = None
     cur_cost = 0.0
     for idx in selected:
         s = window[idx]
-        c = s.price * power_kw * (s.end - s.start).total_seconds() / 3600
+        e = min(energies[idx], max(remaining, 0.0))
+        remaining -= e
+        c = s.price * e
         total += c
         if cur_end is not None and cur_end == s.start:
             cur_end = s.end

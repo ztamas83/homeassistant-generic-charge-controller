@@ -176,7 +176,7 @@ class SmartChargingManager:
             if power_entity := st.config.get(EV_POWER_ENTITY):
                 self.hass.async_create_background_task(
                     self._learning.async_backfill(
-                        ev_id, power_entity, st.config.get(EV_MODEL) or EV_DEFAULT_MODEL
+                        ev_id, power_entity, self._model_type(st)
                     ),
                     f"{DOMAIN}_backfill_{ev_id}",
                 )
@@ -365,6 +365,16 @@ class SmartChargingManager:
         entry, area = household.get(HH_PRICE_CONFIG_ENTRY), household.get(HH_PRICE_AREA)
         return (entry, area) if entry and area else None
 
+    @staticmethod
+    def _model_type(st: EvState) -> str:
+        """Model type of an EV. The panel always saves "average" (the former only
+        model), so that value is treated as the default."""
+        model = st.config.get(EV_MODEL)
+        return EV_DEFAULT_MODEL if not model or model == "average" else model
+
+    def _fallback_power(self, st: EvState) -> float:
+        return float(st.config.get(EV_FALLBACK_POWER_KW) or EV_DEFAULT_FALLBACK_POWER_KW)
+
     def _inputs_key(self, st: EvState, soc: float, estimate: ChargeEstimate) -> str:
         cfg = st.config
         raw = repr(
@@ -374,7 +384,8 @@ class SmartChargingManager:
                 cfg.get(EV_BATTERY_KWH),
                 cfg.get(EV_READY_BY),
                 cfg.get(EV_MAX_BLOCKS, EV_DEFAULT_MAX_BLOCKS),
-                round(estimate.power_kw, 1),
+                tuple(None if v is None else round(v, 1) for v in estimate.hourly_kw),
+                round(estimate.power_kw, 1) if estimate.source == "fallback" else None,
             )
         )
         return hashlib.sha1(raw.encode()).hexdigest()
@@ -408,9 +419,15 @@ class SmartChargingManager:
                 slots,
                 now,
                 deadline,
-                st.estimate.duration,
+                st.energy_needed_kwh,
                 int(st.config.get(EV_MAX_BLOCKS, EV_DEFAULT_MAX_BLOCKS)),
-                st.estimate.power_kw,
+                lambda at: self._learning.power_at(
+                    ev_id,
+                    at,
+                    self._fallback_power(st),
+                    st.soc,
+                    self._model_type(st),
+                ),
                 key,
             )
         if plan.blocks:
@@ -463,12 +480,19 @@ class SmartChargingManager:
                 battery = float(st.config.get(EV_BATTERY_KWH) or 0)
                 st.soc = self._effective_soc(st)
                 st.energy_needed_kwh = max(0.0, battery * (self._effective_target(st) - st.soc) / 100)
+                deadline = self._deadline(st.config, now)
                 st.estimate = self._learning.estimate(
                     ev_id,
                     st.energy_needed_kwh,
-                    float(st.config.get(EV_FALLBACK_POWER_KW) or EV_DEFAULT_FALLBACK_POWER_KW),
+                    self._fallback_power(st),
                     st.soc,
-                    st.config.get(EV_MODEL) or EV_DEFAULT_MODEL,
+                    self._model_type(st),
+                    [
+                        sl.start
+                        for sl in st.slots
+                        if sl.end > now and (deadline is None or sl.end <= deadline)
+                    ],
+                    now,
                 )
 
                 had_plan = st.plan
@@ -559,7 +583,7 @@ class SmartChargingManager:
             power_kw,
             mode,
             connected,
-            st.config.get(EV_MODEL) or EV_DEFAULT_MODEL,
+            self._model_type(st),
         )
 
     def _track_session(self, st: EvState, connected: bool) -> None:
@@ -643,6 +667,8 @@ class SmartChargingManager:
                 "source": estimate.source,
                 "confidence": estimate.confidence,
                 "n_samples": estimate.n_samples,
+                "hourly_kw": estimate.hourly_kw,
+                "hourly_confidence": [round(c, 2) for c in estimate.hourly_confidence],
             }
             if estimate
             else None,
