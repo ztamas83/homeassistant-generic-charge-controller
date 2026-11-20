@@ -8,6 +8,8 @@ on:
 
 jobs:
   test:
+    # The release commit is tested by the tag's release run instead
+    if: ${{ !(github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'Release v')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -19,6 +21,8 @@ jobs:
       - run: pytest
 
   frontend:
+    # The release commit is tested by the tag's release run instead
+    if: ${{ !(github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'Release v')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -30,12 +34,16 @@ jobs:
       - run: make build
 
   hassfest:
+    # The release commit is tested by the tag's release run instead
+    if: ${{ !(github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'Release v')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: home-assistant/actions/hassfest@master
 
   hacs:
+    # The release commit is tested by the tag's release run instead
+    if: ${{ !(github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'Release v')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: hacs/action@main
