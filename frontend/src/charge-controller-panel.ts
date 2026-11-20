@@ -25,6 +25,25 @@ import "./components/cc-dashboard";
 
 type TabId = "dashboard" | "households" | "chargers" | "evs" | "settings";
 
+const TABS: [TabId, string][] = [
+  ["dashboard", "Dashboard"],
+  ["households", "Households"],
+  ["chargers", "Chargers"],
+  ["evs", "EVs"],
+  ["settings", "Settings"],
+];
+
+/** Panel-relative URL of each tab. */
+const TAB_PATHS: Record<TabId, string> = {
+  dashboard: "",
+  households: "/households",
+  chargers: "/chargers",
+  evs: "/evs",
+  settings: "/settings",
+};
+
+const PANEL_URL = "/charge-controller";
+
 const WS = "generic_charge_controller";
 
 @customElement("charge-controller-panel")
@@ -117,8 +136,12 @@ export class ChargeControllerPanel extends LitElement {
 
     return html`
       <div class="toolbar">
-        ${inDetail
-          ? html` <ha-icon-button .label=${"Back"} @click=${this._goBack}>
+        <ha-menu-button
+          .hass=${this.hass}
+          .narrow=${this.narrow}
+        ></ha-menu-button>
+        ${inDetail || this._editingHousehold !== null || this._editingEv !== null
+          ? html`<ha-icon-button .label=${"Back"} @click=${this._goBack}>
               <ha-icon .icon=${"mdi:arrow-left"}></ha-icon>
             </ha-icon-button>`
           : nothing}
@@ -134,36 +157,16 @@ export class ChargeControllerPanel extends LitElement {
       ${!inDetail
         ? html`
             <div class="tabs">
-              <div
-                class="tab ${this._activeTab === "dashboard" ? "active" : ""}"
-                @click=${() => (this._activeTab = "dashboard")}
-              >
-                Dashboard
-              </div>
-              <div
-                class="tab ${this._activeTab === "households" ? "active" : ""}"
-                @click=${() => (this._activeTab = "households")}
-              >
-                Households
-              </div>
-              <div
-                class="tab ${this._activeTab === "chargers" ? "active" : ""}"
-                @click=${() => (this._activeTab = "chargers")}
-              >
-                Chargers
-              </div>
-              <div
-                class="tab ${this._activeTab === "evs" ? "active" : ""}"
-                @click=${() => (this._activeTab = "evs")}
-              >
-                EVs
-              </div>
-              <div
-                class="tab ${this._activeTab === "settings" ? "active" : ""}"
-                @click=${() => (this._activeTab = "settings")}
-              >
-                Settings
-              </div>
+              ${TABS.map(
+                ([tab, label]) => html`
+                  <div
+                    class="tab ${this._activeTab === tab ? "active" : ""}"
+                    @click=${() => this._navigate(TAB_PATHS[tab])}
+                  >
+                    ${label}
+                  </div>
+                `,
+              )}
             </div>
           `
         : nothing}
@@ -188,7 +191,7 @@ export class ChargeControllerPanel extends LitElement {
                 .evs=${this._evs}
                 @ev-selected=${this._onEvSelected}
                 @goto-tab=${(e: CustomEvent<{ tab: TabId }>) =>
-                  (this._activeTab = e.detail.tab)}
+                  this._navigate(TAB_PATHS[e.detail.tab])}
               ></cc-dashboard>`
             : this._activeTab === "households"
             ? this._renderHouseholds()
@@ -295,13 +298,16 @@ export class ChargeControllerPanel extends LitElement {
         this._editingHousehold === "new"
           ? null
           : this._households[this._editingHousehold];
+      if (this._editingHousehold !== "new" && !household) {
+        return html`<p>Household not found.</p>`;
+      }
       return html`
         <div class="detail-view">
           <cc-household-editor
             .hass=${this.hass}
             .household=${household}
             @household-saved=${this._onHouseholdSaved}
-            @editor-closed=${() => (this._editingHousehold = null)}
+            @editor-closed=${this._goBack}
           ></cc-household-editor>
         </div>
       `;
@@ -310,7 +316,7 @@ export class ChargeControllerPanel extends LitElement {
     const households = Object.values(this._households);
     return html`
       <div class="actions">
-        <ha-button @click=${() => (this._editingHousehold = "new")}
+        <ha-button @click=${() => this._navigate("/households/new")}
           >Add household</ha-button
         >
       </div>
@@ -324,7 +330,9 @@ export class ChargeControllerPanel extends LitElement {
                     .hass=${this.hass}
                     .household=${h}
                     @household-edit=${(e: CustomEvent) =>
-                      (this._editingHousehold = e.detail.householdId)}
+                      this._navigate(
+                        `/households/edit/${encodeURIComponent(e.detail.householdId)}`,
+                      )}
                     @household-delete=${this._onHouseholdDelete}
                   ></cc-household-card>
                 `,
@@ -338,6 +346,9 @@ export class ChargeControllerPanel extends LitElement {
     if (this._editingEv !== null) {
       const names: Record<string, string> = {};
       for (const c of chargers) names[c.id] = c.name;
+      if (this._editingEv !== "new" && !this._evs[this._editingEv]) {
+        return html`<p>EV not found.</p>`;
+      }
       return html`
         <div class="detail-view">
           <cc-ev-editor
@@ -346,7 +357,7 @@ export class ChargeControllerPanel extends LitElement {
             .chargerConfigs=${this._chargerConfigs}
             .chargerNames=${names}
             @ev-saved=${this._onEvSaved}
-            @editor-closed=${() => (this._editingEv = null)}
+            @editor-closed=${this._goBack}
           ></cc-ev-editor>
         </div>
       `;
@@ -355,7 +366,7 @@ export class ChargeControllerPanel extends LitElement {
     const evs = Object.values(this._evs);
     return html`
       <div class="actions">
-        <ha-button @click=${() => (this._editingEv = "new")}>Add EV</ha-button>
+        <ha-button @click=${() => this._navigate("/evs/new")}>Add EV</ha-button>
       </div>
       ${evs.length === 0
         ? html`<p>No EVs configured yet.</p>`
@@ -368,7 +379,8 @@ export class ChargeControllerPanel extends LitElement {
                     .ev=${ev}
                     .entities=${this._entities.evs?.[ev.ev_id] ?? {}}
                     @ev-selected=${this._onEvSelected}
-                    @ev-edit=${(e: CustomEvent) => (this._editingEv = e.detail.evId)}
+                    @ev-edit=${(e: CustomEvent) =>
+                      this._navigate(`/evs/edit/${encodeURIComponent(e.detail.evId)}`)}
                     @ev-delete=${this._onEvDelete}
                   ></cc-ev-card>
                 `,
@@ -452,29 +464,46 @@ export class ChargeControllerPanel extends LitElement {
     setTimeout(() => this._loadData(), 3000);
   }
 
+  /**
+   * Show a panel view by pushing its URL, so the browser Back button returns
+   * to the previous view. Entries we push are marked in history.state.
+   */
   private _navigate(path: string) {
-    history.replaceState(null, "", `/charge-controller${path}`);
+    if (location.pathname === `${PANEL_URL}${path}`) {
+      return;
+    }
+    history.pushState({ ccPanel: true }, "", `${PANEL_URL}${path}`);
+    this._applyPath(path);
     window.dispatchEvent(new Event("location-changed"));
   }
 
-  private _goBack() {
-    this._selectedChargerId = null;
-    this._selectedEvId = null;
-    this._navigate("");
-  }
+  /** Back to the previous panel view, or to the parent view on a direct link. */
+  private _goBack = () => {
+    if (history.state?.ccPanel) {
+      history.back();
+      return;
+    }
+    const path = this.route?.path ?? "";
+    const parent = path.startsWith("/charger/")
+      ? TAB_PATHS.chargers
+      : path.startsWith("/ev/") || path.startsWith("/evs/")
+        ? TAB_PATHS.evs
+        : path.startsWith("/households/")
+          ? TAB_PATHS.households
+          : TAB_PATHS.dashboard;
+    this._navigate(parent);
+  };
 
   private _onChargerSelected(e: CustomEvent<{ chargerId: string }>) {
-    this._selectedChargerId = e.detail.chargerId;
-    this._navigate(`/charger/${e.detail.chargerId}`);
+    this._navigate(`/charger/${encodeURIComponent(e.detail.chargerId)}`);
   }
 
   private _onEvSelected(e: CustomEvent<{ evId: string }>) {
-    this._selectedEvId = e.detail.evId;
-    this._navigate(`/ev/${e.detail.evId}`);
+    this._navigate(`/ev/${encodeURIComponent(e.detail.evId)}`);
   }
 
   private async _onEvSaved() {
-    this._editingEv = null;
+    this._goBack();
     await this._loadData();
     // The backend reloads the integration after saving; entities exist shortly after
     setTimeout(() => this._loadData(), 3000);
@@ -494,7 +523,7 @@ export class ChargeControllerPanel extends LitElement {
   }
 
   private async _onHouseholdSaved() {
-    this._editingHousehold = null;
+    this._goBack();
     await this._loadData();
   }
 
@@ -515,16 +544,41 @@ export class ChargeControllerPanel extends LitElement {
   }
 
   private _applyRoute() {
-    const path = this.route?.path ?? "";
+    this._applyPath(this.route?.path ?? "");
+    this._routeApplied = true;
+  }
+
+  /** Set the visible view from a panel-relative URL path. */
+  private _applyPath(path: string) {
+    const rest = (prefix: string) => decodeURIComponent(path.slice(prefix.length));
     this._selectedChargerId = null;
     this._selectedEvId = null;
+    this._editingHousehold = null;
+    this._editingEv = null;
     if (path.startsWith("/charger/")) {
-      this._selectedChargerId = decodeURIComponent(path.slice(9));
+      this._activeTab = "chargers";
+      this._selectedChargerId = rest("/charger/");
     } else if (path.startsWith("/ev/")) {
-      // Keep the active tab, so Back returns to where the detail was opened from
-      this._selectedEvId = decodeURIComponent(path.slice(4));
+      this._activeTab = "evs";
+      this._selectedEvId = rest("/ev/");
+    } else if (path === "/households/new") {
+      this._activeTab = "households";
+      this._editingHousehold = "new";
+    } else if (path.startsWith("/households/edit/")) {
+      this._activeTab = "households";
+      this._editingHousehold = rest("/households/edit/");
+    } else if (path === "/evs/new") {
+      this._activeTab = "evs";
+      this._editingEv = "new";
+    } else if (path.startsWith("/evs/edit/")) {
+      this._activeTab = "evs";
+      this._editingEv = rest("/evs/edit/");
+    } else {
+      const tab = (Object.keys(TAB_PATHS) as TabId[]).find(
+        (t) => TAB_PATHS[t] === path,
+      );
+      this._activeTab = tab ?? "dashboard";
     }
-    this._routeApplied = true;
   }
 
   static styles = css`
@@ -568,6 +622,9 @@ export class ChargeControllerPanel extends LitElement {
     .tabs {
       display: flex;
       gap: 0;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
       border-bottom: 1px solid var(--divider-color);
       padding: 0 16px;
       background: var(--primary-background-color);
@@ -587,6 +644,26 @@ export class ChargeControllerPanel extends LitElement {
       border-bottom: 2px solid transparent;
       transition: all 0.2s ease;
       font-family: inherit;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    @media (max-width: 600px) {
+      .tabs {
+        padding: 0;
+      }
+
+      .tab {
+        padding: 12px 16px;
+      }
+
+      .content {
+        padding: 16px;
+      }
     }
 
     .tab:hover {
@@ -655,6 +732,11 @@ export class ChargeControllerPanel extends LitElement {
       justify-content: center;
       align-items: center;
       height: 100vh;
+    }
+
+    .toolbar ha-menu-button,
+    .toolbar ha-icon-button {
+      color: var(--app-header-text-color, var(--primary-text-color));
     }
 
     ha-icon-button {
